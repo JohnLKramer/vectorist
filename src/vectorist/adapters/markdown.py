@@ -48,6 +48,7 @@ class _IRBuilder:
         self._nodes: dict[str, IRNode] = {}
         self._root_id: str | None = None
         self._section_stack: list[tuple[int, str]] = []
+        self._synthetic_root_id: str | None = None
 
     def _next_id(self) -> str:
         return next(self._id_gen)
@@ -57,9 +58,49 @@ class _IRBuilder:
         return [self._file_label, *titles]
 
     def _current_parent_id(self) -> str | None:
-        if not self._section_stack:
-            return None
-        return self._section_stack[-1][1]
+        if self._section_stack:
+            return self._section_stack[-1][1]
+        if self._synthetic_root_id is not None:
+            return self._synthetic_root_id
+        return None
+
+    def _ensure_synthetic_root(self) -> str:
+        if self._synthetic_root_id is not None:
+            return self._synthetic_root_id
+
+        node_id = self._next_id()
+        line_count = max(1, len(self._content.splitlines()))
+        section = SectionNode(
+            node_id=node_id,
+            node_type=NodeType.SECTION,
+            parent_id=None,
+            children_ids=[],
+            breadcrumbs=[self._file_label],
+            line_range=(1, line_count),
+            raw_content=self._file_label,
+            metadata={},
+            level=1,
+            title=self._file_label,
+        )
+        self._nodes[node_id] = section
+        self._synthetic_root_id = node_id
+        self._root_id = node_id
+        return node_id
+
+    def _promote_to_synthetic_document_root(self) -> None:
+        former_root_id = self._root_id
+        if former_root_id is None:
+            self._ensure_synthetic_root()
+            return
+        synthetic_id = self._ensure_synthetic_root()
+        if former_root_id == synthetic_id:
+            return
+        former_root = self._nodes[former_root_id]
+        if former_root.parent_id is not None:
+            return
+        former_root.parent_id = synthetic_id
+        self._nodes[synthetic_id].children_ids.append(former_root_id)
+        self._root_id = synthetic_id
 
     def _add_child(self, parent_id: str | None, child_id: str) -> None:
         if parent_id is None:
@@ -70,6 +111,12 @@ class _IRBuilder:
     def _open_section(self, level: int, title: str, line_range: tuple[int, int]) -> str:
         while self._section_stack and self._section_stack[-1][0] >= level:
             self._section_stack.pop()
+
+        if level == 1 and not self._section_stack:
+            if self._synthetic_root_id is not None:
+                pass
+            elif self._root_id is not None:
+                self._promote_to_synthetic_document_root()
 
         parent_id = self._current_parent_id()
         node_id = self._next_id()
@@ -93,13 +140,19 @@ class _IRBuilder:
         self._add_child(parent_id, node_id)
         self._section_stack.append((level, node_id))
 
-        if self._root_id is None:
-            self._root_id = node_id
+        if self._root_id is None or self._root_id == self._synthetic_root_id:
+            if self._synthetic_root_id is None and parent_id is None:
+                self._root_id = node_id
 
         return node_id
 
+    def _attach_top_level_block(self, parent_id: str | None) -> str | None:
+        if self._section_stack or parent_id is not None:
+            return parent_id
+        return self._ensure_synthetic_root()
+
     def _add_paragraph(self, text: str, line_range: tuple[int, int]) -> None:
-        parent_id = self._current_parent_id()
+        parent_id = self._attach_top_level_block(self._current_parent_id())
         node_id = self._next_id()
         node = ParagraphNode(
             node_id=node_id,
@@ -115,7 +168,7 @@ class _IRBuilder:
         self._add_child(parent_id, node_id)
 
     def _add_code_block(self, token: Token) -> None:
-        parent_id = self._current_parent_id()
+        parent_id = self._attach_top_level_block(self._current_parent_id())
         node_id = self._next_id()
         info = token.info if token.info else None
         language, detection_source = detect_code_language(info, self._source_uri)
@@ -135,7 +188,7 @@ class _IRBuilder:
         self._add_child(parent_id, node_id)
 
     def _add_table(self, tokens: list[Token], start: int) -> int:
-        parent_id = self._current_parent_id()
+        parent_id = self._attach_top_level_block(self._current_parent_id())
         node_id = self._next_id()
         open_token = tokens[start]
         headers: list[str] = []
@@ -182,7 +235,7 @@ class _IRBuilder:
         return i
 
     def _add_media(self, src: str, alt_text: str, line_range: tuple[int, int]) -> None:
-        parent_id = self._current_parent_id()
+        parent_id = self._attach_top_level_block(self._current_parent_id())
         node_id = self._next_id()
         node = MediaNode(
             node_id=node_id,
@@ -208,18 +261,34 @@ class _IRBuilder:
         lines = self._content.splitlines()
         return "\n".join(lines[token.map[0] : token.map[1]])
 
-    def _handle_inline(self, token: Token) -> bool:
-        """Return True if inline was fully handled (e.g. lone image)."""
+    def _process_inline_paragraph(self, token: Token, line_range: tuple[int, int]) -> None:
         if not token.children:
-            return False
+            if token.content.strip():
+                self._add_paragraph(token.content, line_range)
+            return
+
         images = [c for c in token.children if c.type == "image"]
-        if len(images) == 1 and len(token.children) == 1:
-            img = images[0]
-            src = img.attrGet("src") or ""
-            alt = img.content or img.attrGet("alt") or ""
-            self._add_media(src, alt, _line_range(token))
-            return True
-        return False
+        if not images:
+            self._add_paragraph(token.content, line_range)
+            return
+
+        text_buffer = ""
+        for child in token.children:
+            if child.type == "text":
+                text_buffer += child.content
+            elif child.type == "softbreak" or child.type == "hardbreak":
+                text_buffer += "\n"
+            elif child.type == "image":
+                if text_buffer.strip():
+                    self._add_paragraph(text_buffer.strip(), line_range)
+                text_buffer = ""
+                src = child.attrGet("src") or ""
+                alt = child.content or child.attrGet("alt") or ""
+                self._add_media(src, alt, line_range)
+            else:
+                text_buffer += child.content
+        if text_buffer.strip():
+            self._add_paragraph(text_buffer.strip(), line_range)
 
     def build(self, tokens: list[Token]) -> None:
         i = 0
@@ -235,8 +304,7 @@ class _IRBuilder:
             if tok.type == "paragraph_open":
                 inline = tokens[i + 1]
                 if inline.type == "inline" and inline.content.strip():
-                    if not self._handle_inline(inline):
-                        self._add_paragraph(inline.content, _line_range(tok))
+                    self._process_inline_paragraph(inline, _line_range(tok))
                 i += 3
                 continue
             if tok.type == "fence":
@@ -250,21 +318,7 @@ class _IRBuilder:
 
     def to_document(self) -> IRDocument:
         if self._root_id is None:
-            node_id = self._next_id()
-            section = SectionNode(
-                node_id=node_id,
-                node_type=NodeType.SECTION,
-                parent_id=None,
-                children_ids=[],
-                breadcrumbs=[self._file_label],
-                line_range=(1, max(1, len(self._content.splitlines()))),
-                raw_content=self._file_label,
-                metadata={},
-                level=1,
-                title=self._file_label,
-            )
-            self._nodes[node_id] = section
-            self._root_id = node_id
+            self._ensure_synthetic_root()
         return IRDocument(
             source_uri=self._source_uri,
             root_id=self._root_id,
