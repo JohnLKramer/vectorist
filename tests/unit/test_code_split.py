@@ -8,14 +8,30 @@ from vectorist.chunking.code_split import split_code
 from vectorist.chunking.tokenizer import estimate_tokens
 
 
-def test_fallback_splits_on_braces_and_semicolons():
-    src = "function a(){ return 1; }\nfunction b(){ return 2; }\n"
-    parts = split_code(src, language="unknown", max_tokens=8)
-    assert len(parts) >= 2
-    assert "".join(parts) == src
+def test_fallback_keeps_cut_on_closing_brace_when_later_line_fits():
+    brace = "function a(){ return 1; }\n"
+    later = "function b()\n"
+    src = brace + later + ("word " * 30)
+    budget = estimate_tokens(brace + later)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens(later) <= budget
+    parts = split_code(src, language="unknown", max_tokens=budget)
     assert parts[0].rstrip("\n").endswith("}")
-    assert "function a(){ return 1;" in parts[0]
+    assert "function b()" not in parts[0]
     assert parts[1].startswith("function b()")
+
+
+def test_fallback_splits_on_semicolon_before_later_fitting_line():
+    semi = "do_work();\n"
+    later = "plain line\n"
+    src = semi + later + ("word " * 30)
+    budget = estimate_tokens(semi + later)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens(later) <= budget
+    parts = split_code(src, language="unknown", max_tokens=budget)
+    assert parts[0].rstrip("\n").endswith(";")
+    assert "plain" not in parts[0]
+    assert parts[1].lstrip().startswith("plain")
 
 
 def test_python_treesitter_does_not_split_mid_function_when_budget_allows_whole_functions():
