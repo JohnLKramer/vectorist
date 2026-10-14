@@ -112,7 +112,7 @@ class _IRBuilder:
         while self._section_stack and self._section_stack[-1][0] >= level:
             self._section_stack.pop()
 
-        if level == 1 and not self._section_stack:
+        if not self._section_stack:
             if self._synthetic_root_id is not None:
                 pass
             elif self._root_id is not None:

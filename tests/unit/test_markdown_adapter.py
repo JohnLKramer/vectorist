@@ -108,6 +108,36 @@ def test_pooling_all_nodes_reachable_from_root(pooling_md: str):
     assert_all_nodes_reachable(doc)
 
 
+def test_two_top_level_h2_sections_both_reachable():
+    content = "## Installation\n\nSteps.\n\n## Usage\n\nExamples.\n"
+    doc = MarkdownAdapter().parse("guide.md", content)
+    assert_all_nodes_reachable(doc)
+    root = doc.nodes[doc.root_id]
+    assert isinstance(root, SectionNode)
+    assert root.title == "guide.md"
+    h2_titles = [
+        doc.nodes[cid].title
+        for cid in root.children_ids
+        if doc.nodes[cid].node_type == NodeType.SECTION
+    ]
+    assert h2_titles == ["Installation", "Usage"]
+
+
+def test_h3_then_h2_promotes_and_stays_reachable():
+    content = "### Deep\n\nDetail.\n\n## Higher\n\nOverview.\n"
+    doc = MarkdownAdapter().parse("nested.md", content)
+    assert_all_nodes_reachable(doc)
+    root = doc.nodes[doc.root_id]
+    assert isinstance(root, SectionNode)
+    assert root.title == "nested.md"
+    top_sections = [
+        doc.nodes[cid]
+        for cid in root.children_ids
+        if doc.nodes[cid].node_type == NodeType.SECTION
+    ]
+    assert {s.title for s in top_sections} == {"Deep", "Higher"}
+
+
 def test_two_top_level_h1_sections_both_reachable():
     content = "# First\n\nIntro.\n\n# Second\n\nMore.\n"
     doc = MarkdownAdapter().parse("two-h1.md", content)
