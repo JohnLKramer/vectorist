@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vectorist.chunking.chunker import Chunk, Chunker
+from vectorist.chunking.chunker import Chunk, Chunker, _context_header
 from vectorist.chunking.tokenizer import estimate_tokens
 from vectorist.ir.models import (
     CodeBlockNode,
@@ -77,10 +77,6 @@ def _code(
         language="python",
         detection_source="fence",
     )
-
-
-def _context_header(breadcrumbs: list[str]) -> str:
-    return f"[Context: {' > '.join(breadcrumbs)}]"
 
 
 def test_estimate_tokens_whitespace_word_approximation():
@@ -363,3 +359,186 @@ def test_sibling_h1_sections_are_isolated():
         assert not (
             "First intro." in chunk.content_text and "Second intro." in chunk.content_text
         )
+
+
+def test_h3_siblings_under_h2_use_own_breadcrumb_headers():
+    crumbs_h2 = ["doc.md", "Chapter"]
+    crumbs_a = ["doc.md", "Chapter", "Part A"]
+    crumbs_b = ["doc.md", "Chapter", "Part B"]
+    root = _section(
+        "root",
+        parent_id=None,
+        children_ids=["h2"],
+        breadcrumbs=["doc.md"],
+        level=1,
+        title="doc.md",
+    )
+    h2 = _section(
+        "h2",
+        parent_id="root",
+        children_ids=["h3-a", "h3-b"],
+        breadcrumbs=crumbs_h2,
+        level=2,
+        title="Chapter",
+    )
+    h3_a = _section(
+        "h3-a",
+        parent_id="h2",
+        children_ids=["pa"],
+        breadcrumbs=crumbs_a,
+        level=3,
+        title="Part A",
+    )
+    h3_b = _section(
+        "h3-b",
+        parent_id="h2",
+        children_ids=["pb"],
+        breadcrumbs=crumbs_b,
+        level=3,
+        title="Part B",
+    )
+    pa = _paragraph(
+        "pa",
+        parent_id="h3-a",
+        text="Alpha detail.",
+        breadcrumbs=crumbs_a,
+        line_range=(4, 4),
+    )
+    pb = _paragraph(
+        "pb",
+        parent_id="h3-b",
+        text="Beta detail.",
+        breadcrumbs=crumbs_b,
+        line_range=(8, 8),
+    )
+    doc = IRDocument(
+        source_uri="doc.md",
+        root_id="root",
+        nodes={
+            "root": root,
+            "h2": h2,
+            "h3-a": h3_a,
+            "h3-b": h3_b,
+            "pa": pa,
+            "pb": pb,
+        },
+    )
+
+    chunks = Chunker(max_tokens=512).chunk_document(doc)
+    assert len(chunks) == 2
+    alpha_chunk = next(c for c in chunks if "Alpha detail." in c.content_text)
+    beta_chunk = next(c for c in chunks if "Beta detail." in c.content_text)
+    assert alpha_chunk.content_text.startswith(_context_header(crumbs_a))
+    assert beta_chunk.content_text.startswith(_context_header(crumbs_b))
+    assert alpha_chunk.breadcrumbs == crumbs_a
+    assert beta_chunk.breadcrumbs == crumbs_b
+    assert "Beta detail." not in alpha_chunk.content_text
+    assert "Alpha detail." not in beta_chunk.content_text
+
+
+def test_oversized_multi_block_paragraph_sentence_splits_first_block():
+    crumbs = ["doc.md"]
+    root = _section(
+        "root",
+        parent_id=None,
+        children_ids=["p"],
+        breadcrumbs=crumbs,
+        level=1,
+        title="doc.md",
+    )
+    body = "Sentence one. Sentence two.\n\nTail."
+    p = _paragraph(
+        "p",
+        parent_id="root",
+        text=body,
+        breadcrumbs=crumbs,
+        line_range=(1, 3),
+    )
+    doc = IRDocument(
+        source_uri="doc.md",
+        root_id="root",
+        nodes={"root": root, "p": p},
+    )
+
+    chunks = Chunker(max_tokens=4).chunk_document(doc)
+    bodies = [c.content_text.split("\n\n", 1)[1] for c in chunks]
+    assert "Sentence one." in bodies
+    assert "Sentence two." in bodies
+    assert "Tail." in bodies
+    assert not any("Sentence one. Sentence two." in b for b in bodies)
+
+
+def test_split_paragraph_pieces_in_one_chunk_list_node_once():
+    crumbs = ["doc.md"]
+    root = _section(
+        "root",
+        parent_id=None,
+        children_ids=["p"],
+        breadcrumbs=crumbs,
+        level=1,
+        title="doc.md",
+    )
+    body = "Alpha beta.\n\nGamma delta."
+    p = _paragraph(
+        "p",
+        parent_id="root",
+        text=body,
+        breadcrumbs=crumbs,
+        line_range=(1, 3),
+    )
+    doc = IRDocument(
+        source_uri="doc.md",
+        root_id="root",
+        nodes={"root": root, "p": p},
+    )
+
+    chunks = Chunker(max_tokens=20).chunk_document(doc)
+    single = next(c for c in chunks if "Alpha beta." in c.content_text and "Gamma delta." in c.content_text)
+    assert single.node_ids == ["p"]
+    assert single.node_types == [NodeType.PARAGRAPH.value]
+
+
+def test_every_chunk_respects_max_tokens_including_header():
+    crumbs = ["doc.md", "Chapter", "Part A"]
+    root = _section(
+        "root",
+        parent_id=None,
+        children_ids=["h2"],
+        breadcrumbs=["doc.md"],
+        level=1,
+        title="doc.md",
+    )
+    h2 = _section(
+        "h2",
+        parent_id="root",
+        children_ids=["h3"],
+        breadcrumbs=["doc.md", "Chapter"],
+        level=2,
+        title="Chapter",
+    )
+    h3 = _section(
+        "h3",
+        parent_id="h2",
+        children_ids=["p1", "p2"],
+        breadcrumbs=crumbs,
+        level=3,
+        title="Part A",
+    )
+    p1 = _paragraph("p1", parent_id="h3", text="Short.", breadcrumbs=crumbs, line_range=(1, 1))
+    p2 = _paragraph(
+        "p2",
+        parent_id="h3",
+        text="Another short line.",
+        breadcrumbs=crumbs,
+        line_range=(2, 2),
+    )
+    doc = IRDocument(
+        source_uri="doc.md",
+        root_id="root",
+        nodes={"root": root, "h2": h2, "h3": h3, "p1": p1, "p2": p2},
+    )
+
+    max_tokens = 12
+    chunks = Chunker(max_tokens=max_tokens).chunk_document(doc)
+    for chunk in chunks:
+        assert estimate_tokens(chunk.content_text) <= max_tokens

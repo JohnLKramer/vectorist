@@ -12,6 +12,12 @@ def _context_header(breadcrumbs: list[str]) -> str:
     return f"[Context: {' > '.join(breadcrumbs)}]"
 
 
+def _content_text(breadcrumbs: list[str], body_parts: list[str]) -> str:
+    header = _context_header(breadcrumbs)
+    body = "\n\n".join(body_parts)
+    return f"{header}\n\n{body}" if body else header
+
+
 def _is_boundary_section(node: IRNode) -> bool:
     return node.node_type == NodeType.SECTION and isinstance(node, SectionNode) and node.level <= 2
 
@@ -94,27 +100,25 @@ class Chunker:
 
     def _chunk_region(self, nodes: list[IRNode]) -> list[Chunk]:
         chunks: list[Chunk] = []
-        batch: list[IRNode] = []
-        batch_texts: list[str] = []
-        breadcrumbs = nodes[0].breadcrumbs if nodes else []
+        batch: list[tuple[IRNode, str]] = []
 
-        def batch_token_count() -> int:
-            if not batch_texts:
-                return 0
-            return estimate_tokens("\n\n".join(batch_texts))
+        def batch_breadcrumbs() -> list[str]:
+            return batch[0][0].breadcrumbs if batch else []
 
         def flush_batch() -> None:
-            nonlocal batch, batch_texts
+            nonlocal batch
             if not batch:
                 return
-            chunks.append(self._make_chunk(batch, breadcrumbs, batch_texts))
+            crumbs = batch_breadcrumbs()
+            chunk = self._make_chunk(batch, crumbs)
+            assert estimate_tokens(chunk.content_text) <= self._max_tokens
+            chunks.append(chunk)
             batch = []
-            batch_texts = []
 
         for node in nodes:
-            breadcrumbs = node.breadcrumbs
-            header_tokens = estimate_tokens(_context_header(breadcrumbs))
-            limit = self._max_tokens - header_tokens
+            crumbs = node.breadcrumbs
+            header = _context_header(crumbs)
+            limit = self._max_tokens - estimate_tokens(header)
 
             if _oversized_code_or_table(node) and estimate_tokens(node.raw_content) > limit:
                 flush_batch()
@@ -130,61 +134,104 @@ class Chunker:
 
             for piece in pieces:
                 piece_tokens = estimate_tokens(piece)
-                if piece_tokens > limit:
+                if piece_tokens > limit and _oversized_code_or_table(node):
+                    flush_batch()
+                    raise NotImplementedError(
+                        "oversized code/table splitting is handled in later tasks"
+                    )
+
+                if batch and batch_breadcrumbs() != node.breadcrumbs:
+                    flush_batch()
+
+                trial = batch + [(node, piece)]
+                trial_crumbs = trial[0][0].breadcrumbs
+                trial_text = _content_text(trial_crumbs, [t for _, t in trial])
+                if batch and estimate_tokens(trial_text) > self._max_tokens:
+                    flush_batch()
+                    trial = [(node, piece)]
+                    trial_crumbs = node.breadcrumbs
+                    trial_text = _content_text(trial_crumbs, [piece])
+
+                if estimate_tokens(trial_text) > self._max_tokens:
                     if _oversized_code_or_table(node):
+                        flush_batch()
                         raise NotImplementedError(
                             "oversized code/table splitting is handled in later tasks"
                         )
-
-                if batch and batch_token_count() + piece_tokens > limit:
                     flush_batch()
+                    chunk = self._make_chunk([(node, piece)], node.breadcrumbs)
+                    assert estimate_tokens(chunk.content_text) <= self._max_tokens
+                    chunks.append(chunk)
+                    continue
 
-                if len(pieces) == 1 and piece == node.raw_content:
-                    batch.append(node)
-                    batch_texts.append(piece)
-                else:
-                    batch.append(node)
-                    batch_texts.append(piece)
+                batch = trial
 
         flush_batch()
         return chunks
 
-    def _split_text_to_limit(self, text: str, limit: int) -> list[str]:
+    def _word_split(self, text: str, limit: int) -> list[str]:
         pieces: list[str] = []
-        for block in _split_paragraph_text(text):
+        words = text.split()
+        current: list[str] = []
+        for word in words:
+            candidate = " ".join(current + [word])
+            if current and estimate_tokens(candidate) > limit:
+                pieces.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            pieces.append(" ".join(current))
+        return pieces
+
+    def _split_text_to_limit(self, text: str, limit: int) -> list[str]:
+        blocks = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+        if not blocks:
+            return [text]
+
+        pieces: list[str] = []
+        for block in blocks:
             if estimate_tokens(block) <= limit:
                 pieces.append(block)
                 continue
-            words = block.split()
-            current: list[str] = []
-            for word in words:
-                candidate = " ".join(current + [word])
-                if current and estimate_tokens(candidate) > limit:
-                    pieces.append(" ".join(current))
-                    current = [word]
-                else:
-                    current.append(word)
-            if current:
-                pieces.append(" ".join(current))
+
+            sentences = re.split(r"(?<=[.!?])\s+", block.strip())
+            sentences = [s.strip() for s in sentences if s.strip()]
+            if len(sentences) > 1:
+                for sentence in sentences:
+                    if estimate_tokens(sentence) <= limit:
+                        pieces.append(sentence)
+                    else:
+                        pieces.extend(self._word_split(sentence, limit))
+            else:
+                pieces.extend(self._word_split(block, limit))
         return pieces
 
     def _make_chunk(
         self,
-        nodes: list[IRNode],
+        items: list[tuple[IRNode, str]],
         breadcrumbs: list[str],
-        texts: list[str],
     ) -> Chunk:
+        texts = [text for _, text in items]
         body = "\n\n".join(texts)
-        node_ids = [n.node_id for n in nodes]
-        node_types = [n.node_type.value for n in nodes]
+        seen: set[str] = set()
+        node_ids: list[str] = []
+        node_types: list[str] = []
+        for node, _ in items:
+            if node.node_id in seen:
+                continue
+            seen.add(node.node_id)
+            node_ids.append(node.node_id)
+            node_types.append(node.node_type.value)
+
+        nodes = [node for node, _ in items]
         starts = [n.line_range[0] for n in nodes]
         ends = [n.line_range[1] for n in nodes]
         metadata: dict[str, Any] = {}
         for n in nodes:
             metadata.update(n.metadata)
 
-        header = _context_header(breadcrumbs)
-        content_text = f"{header}\n\n{body}" if body else header
+        content_text = _content_text(breadcrumbs, texts)
         return Chunk(
             chunk_index=0,
             content_text=content_text,
