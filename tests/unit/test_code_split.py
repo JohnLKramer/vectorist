@@ -43,19 +43,33 @@ def test_fallback_returns_when_over_budget_line_is_not_last():
     assert "y = 2" in "".join(parts)
 
 
-def test_python_class_splits_one_method_per_slice_when_over_budget():
+def test_python_class_keeps_method_body_with_signature_when_over_budget():
     src = (
         "class C:\n"
+        "    @dec\n"
         "    def m1(self):\n"
         "        return 1\n"
         "    def m2(self):\n"
         "        return 2\n"
     )
-    method_budget = estimate_tokens("    def m1(self):\n        return 1\n") + 2
-    parts = split_code(src, language="python", max_tokens=method_budget)
+    decorated = "    @dec\n    def m1(self):\n        return 1\n"
+    plain = "    def m2(self):\n        return 2\n"
+    budget = estimate_tokens(decorated)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens(decorated) <= budget
+    assert estimate_tokens(plain) <= budget
+    parts = split_code(src, language="python", max_tokens=budget)
     assert len(parts) >= 2
-    assert sum(1 for p in parts if "def m1" in p) == 1
-    assert sum(1 for p in parts if "def m2" in p) == 1
+    for part in parts:
+        if "def m1" in part or "return 1" in part or "@dec" in part:
+            assert "def m1" in part
+            assert "return 1" in part
+            assert "@dec" in part
+        if "def m2" in part or "return 2" in part:
+            assert "def m2" in part
+            assert "return 2" in part
+    assert any("def m1" in part and "return 1" in part for part in parts)
+    assert any("def m2" in part and "return 2" in part for part in parts)
 
 
 def test_semicolon_inside_string_is_not_a_split_point():
@@ -66,11 +80,56 @@ def test_semicolon_inside_string_is_not_a_split_point():
 
 
 def test_dedent_starts_next_slice_at_less_indented_line():
-    src = "    inner()\nplain()\n"
-    parts = split_code(src, language="unknown", max_tokens=1)
+    src = "    inner()\nplain()\nfollow()\n"
+    fitting = "    inner()\nplain()\n"
+    budget = estimate_tokens(fitting)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens("    inner()\n") + estimate_tokens("plain()\n") <= budget
+    parts = split_code(src, language="unknown", max_tokens=budget)
     assert len(parts) >= 2
+    assert "plain()" not in parts[0]
     assert parts[0].strip() == "inner()"
-    assert parts[1].lstrip().startswith("plain()")
+
+
+def test_blank_line_outranks_dedent():
+    src = "    inner()\nplain()\n\n" + ("word " * 20)
+    fitting = "    inner()\nplain()\n\n"
+    budget = estimate_tokens(fitting) + 1
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens("plain()") <= budget
+    parts = split_code(src, language="unknown", max_tokens=budget)
+    assert "plain()" in parts[0]
+    assert "word" not in parts[0]
+
+
+def test_java_semicolon_inside_fitting_method_does_not_split_method():
+    src = (
+        "class C {\n"
+        "  void m1() {\n"
+        "    int x = 1;\n"
+        "    int z = 3;\n"
+        "  }\n"
+        "  void m2() {\n"
+        "    int y = 2;\n"
+        "    int w = 4;\n"
+        "  }\n"
+        "}\n"
+    )
+    method = (
+        "  void m1() {\n"
+        "    int x = 1;\n"
+        "    int z = 3;\n"
+        "  }\n"
+    )
+    budget = estimate_tokens(method)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens(method) <= budget
+    parts = split_code(src, language="java", max_tokens=budget)
+    assert any(
+        "void m1" in part and "int x = 1;" in part and "int z = 3;" in part
+        for part in parts
+    )
+    assert not any("int x = 1;" in part and "void m1" not in part for part in parts)
 
 
 def test_delimiter_split_kept_when_line_also_has_long_span():

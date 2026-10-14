@@ -44,7 +44,7 @@ _TOP_LEVEL_DEF_TYPES: dict[str, frozenset[str]] = {
 }
 
 _INNER_DEF_TYPES: dict[str, frozenset[str]] = {
-    "python": frozenset({"function_definition"}),
+    "python": frozenset({"function_definition", "decorated_definition"}),
     "javascript": frozenset({"method_definition", "function_declaration"}),
     "typescript": frozenset({"method_definition", "function_declaration"}),
     "go": frozenset({"method_declaration"}),
@@ -133,26 +133,62 @@ def _segments_at_boundaries(
     return [s for s in segments if s]
 
 
+def _inner_definitions_under(start: Node, language: str) -> list[Node]:
+    """Return sibling methods inside one class or function.
+
+    A decorated definition counts as one method so the decorator stays with
+    the signature and body.
+    """
+    inner_types = _INNER_DEF_TYPES.get(language, frozenset())
+    descend_types = (
+        inner_types
+        | _CONTAINER_BODY_TYPES.get(language, frozenset())
+        | _TOP_LEVEL_DEF_TYPES.get(language, frozenset())
+    )
+    queue: list[Node] = [start]
+    seen: set[int] = set()
+    while queue:
+        current = queue.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        children = list(current.children)
+        found = [child for child in children if child.type in inner_types]
+        if len(found) > 1:
+            return found
+        for child in children:
+            if child.type in descend_types:
+                queue.append(child)
+    return []
+
+
 def _boundary_nodes(node: Node, language: str, *, module_level: bool) -> list[Node]:
-    def_types = _TOP_LEVEL_DEF_TYPES.get(language, frozenset()) if module_level else frozenset()
+    top_types = _TOP_LEVEL_DEF_TYPES.get(language, frozenset())
     inner_types = _INNER_DEF_TYPES.get(language, frozenset())
     body_types = _CONTAINER_BODY_TYPES.get(language, frozenset())
 
     if module_level:
-        matched = [c for c in node.children if c.type in def_types]
-        if matched:
+        matched = [child for child in node.children if child.type in top_types]
+        if len(matched) > 1:
+            return matched
+        if len(matched) == 1:
+            inner = _inner_definitions_under(matched[0], language)
+            if len(inner) > 1:
+                return inner
             return matched
 
-    if node.type in def_types | inner_types | body_types:
-        inner = [c for c in node.children if c.type in inner_types]
-        if inner:
+    if node.type in top_types | inner_types | body_types:
+        inner = _inner_definitions_under(node, language)
+        if len(inner) > 1:
             return inner
-        for child in node.children:
-            if child.type in body_types:
-                nested = [c for c in child.children if c.type in inner_types]
-                if nested:
-                    return nested
 
+    containers = [
+        child
+        for child in node.children
+        if child.type in top_types | inner_types | body_types
+    ]
+    if len(containers) == 1:
+        return _inner_definitions_under(containers[0], language)
     return []
 
 
@@ -205,7 +241,7 @@ def _line_indent(line: str) -> int:
 def _delimiter_priority_at_line(line: str) -> int | None:
     stripped = line.strip()
     if not stripped:
-        return 3
+        return 2
     if stripped.endswith(";") or stripped.endswith("}"):
         return 0
     if stripped.startswith("{") or stripped.endswith("{"):
@@ -381,11 +417,11 @@ def _fallback_split(
     for index, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
-            split_after.append((index, 3))
+            split_after.append((index, 2))
         else:
             indent = _line_indent(line)
             if prev_indent is not None and indent < prev_indent:
-                split_before.append((index, 2))
+                split_before.append((index, 3))
             delim = _delimiter_priority_at_line(line)
             if delim is not None:
                 split_after.append((index, delim))

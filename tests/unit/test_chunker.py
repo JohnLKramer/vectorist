@@ -242,10 +242,11 @@ def test_oversized_code_single_token_emits_without_assertion_error():
         level=1,
         title="doc.md",
     )
+    token = "x" * 500
     code = _code(
         "code",
         parent_id="root",
-        text="x" * 500,
+        text=token,
         breadcrumbs=crumbs,
         line_range=(1, 1),
     )
@@ -255,9 +256,13 @@ def test_oversized_code_single_token_emits_without_assertion_error():
         nodes={"root": root, "code": code},
     )
 
-    chunks = Chunker(max_tokens=10).chunk_document(doc)
+    header_budget = estimate_tokens(_context_header(crumbs))
+    assert estimate_tokens(token) == 1
+    assert header_budget >= estimate_tokens(token)
+    chunks = Chunker(max_tokens=header_budget).chunk_document(doc)
     assert len(chunks) == 1
-    assert "x" * 500 in chunks[0].content_text
+    assert token in chunks[0].content_text
+    assert estimate_tokens(chunks[0].content_text) > header_budget
 
 
 def test_oversized_paragraph_splits_on_blank_lines():
