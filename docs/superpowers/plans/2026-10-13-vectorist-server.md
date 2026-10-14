@@ -22,6 +22,9 @@
 - Do not implement CLI, crawler, HTML/PDF adapters, auth, or async OCR in this plan.
 - TDD: failing test → implement → pass → commit per task.
 - Package import root: `vectorist`.
+- `docs/superpowers/` (this plan and the spec) is ephemeral. Do not merge it to `main`. Before opening a PR to `main`, delete `docs/superpowers/` on this branch so the merge removes it. Do not rewrite history.
+- Do not merge other ephemeral notes to `main`.
+- Durable docs: high-level roadmap only in `roadmap.md`. Functional and product docs only under `wiki/`, and only after the code they describe exists. `README.md` stays a short summary plus pointers to those two. Do not put usage manuals in `README.md`.
 
 ---
 
@@ -29,7 +32,10 @@
 
 ```text
 pyproject.toml
-README.md
+README.md                       # short summary + pointers only
+AGENTS.md                       # agent instructions (already present)
+roadmap.md                      # high-level roadmap (already present)
+wiki/                           # product docs; create in Task 14, after the code
 migrations/
   sqlite/
     001_cache_init.sql
@@ -118,7 +124,6 @@ tests/
 - Create: `src/vectorist/__init__.py`
 - Create: `src/vectorist/__main__.py`
 - Create: `tests/conftest.py`
-- Modify: `README.md` (minimal run/test instructions)
 
 **Interfaces:**
 - Consumes: nothing
@@ -229,7 +234,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add pyproject.toml src/vectorist/__init__.py src/vectorist/__main__.py tests/conftest.py tests/unit/test_version.py README.md uv.lock
+git add pyproject.toml src/vectorist/__init__.py src/vectorist/__main__.py tests/conftest.py tests/unit/test_version.py uv.lock
 git commit -m "chore: scaffold vectorist Python package with uv and pytest"
 ```
 
@@ -1057,20 +1062,25 @@ git commit -m "feat: expose FastAPI ingest, document, search, and health APIs"
 
 ---
 
-### Task 14: README, Health Semantics, Golden Fixture Polish
+### Task 14: Wiki, Health Semantics, Golden Fixture Polish
+
+Write this task only after Tasks 1–13 have landed. Product documentation describes the code that exists, not the plan.
 
 **Files:**
-- Modify: `README.md`
+- Create: `wiki/server.md` (usage: how to run, env vars, ingest and search)
+- Modify: `roadmap.md` only if Phase 1 scope changed while implementing
 - Modify: tests/fixtures as needed for reliable fake-embed retrieval (ensure query terms appear in chunk text)
 - Create: `tests/integration/test_idempotency_api.py` if not already covered
+- Do not expand `README.md` beyond the existing pointers to `roadmap.md` and `wiki/`
 
 **Requirements:**
-- README documents: `uv sync --extra dev`, `uv run pytest`, `uv run vectorist` (or `python -m vectorist`), env vars (`VECTORIST_CACHE_PATH`, `VECTORIST_VEC_PATH`, `VECTORIST_VECTOR_BACKEND`, `VECTORIST_DATABASE_URL`, `VECTORIST_EMBEDDER`)
+- `wiki/server.md` documents the commands and settings the code actually uses: install, `uv run pytest`, `uv run vectorist` (or `python -m vectorist`), and env vars (`VECTORIST_CACHE_PATH`, `VECTORIST_VEC_PATH`, `VECTORIST_VECTOR_BACKEND`, `VECTORIST_DATABASE_URL`, `VECTORIST_EMBEDDER`)
 - `/v1/health` returns `{status: ok|degraded, cache: ok, vector_store: ok, embedder: ok}`
 - Second identical ingest via API returns `skipped`
+- Do not add `docs/superpowers/` to this commit
 
 - [ ] **Step 1: Add/adjust tests for skip + health**
-- [ ] **Step 2: Update README**
+- [ ] **Step 2: Write `wiki/server.md` from the implemented server**
 - [ ] **Step 3: Run full suite**
 
 ```bash
@@ -1081,7 +1091,7 @@ Expected: all non-skipped tests PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add README.md tests
+git add wiki/server.md roadmap.md tests
 git commit -m "docs: document Phase 1 server usage and verify golden ingest path"
 ```
 
@@ -1106,6 +1116,8 @@ git commit -m "docs: document Phase 1 server usage and verify golden ingest path
 | Liquibase SQL + embedded runner | Task 3 |
 | HTTP ingest stream/single, documents, search, health | Task 13 |
 | E2E SQLite path without Docker | Task 13, 14 |
+| Product docs in `wiki/` after code; roadmap stays in `roadmap.md` | Task 14 |
+| `docs/superpowers/` not merged to `main` | Global Constraints; delete on branch before PR |
 | MediaNode stub PENDING | Task 5 |
 | No CLI/crawler/HTML/PDF/auth | Honored (omitted) |
 

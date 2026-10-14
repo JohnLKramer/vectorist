@@ -339,6 +339,8 @@ Structured error example:
 
 ## 12. Product Roadmap (Context)
 
+The durable roadmap is `roadmap.md` at the repo root. This spec is ephemeral and must not be merged to `main`. Do not copy this section into README or wiki.
+
 | Phase | Focus |
 | :--- | :--- |
 | **1 (this spec)** | Core IR, Markdown adapter, chunker, cache, embeddings, vector backends, ingest + search |
