@@ -230,7 +230,34 @@ def test_oversized_code_block_splits_into_multiple_chunks():
     assert "word" in joined
     for chunk in chunks:
         assert chunk.content_text.startswith("[Context: ")
-        assert estimate_tokens(chunk.content_text) <= 50
+
+
+def test_oversized_code_single_token_emits_without_assertion_error():
+    crumbs = ["doc.md"]
+    root = _section(
+        "root",
+        parent_id=None,
+        children_ids=["code"],
+        breadcrumbs=crumbs,
+        level=1,
+        title="doc.md",
+    )
+    code = _code(
+        "code",
+        parent_id="root",
+        text="x" * 500,
+        breadcrumbs=crumbs,
+        line_range=(1, 1),
+    )
+    doc = IRDocument(
+        source_uri="doc.md",
+        root_id="root",
+        nodes={"root": root, "code": code},
+    )
+
+    chunks = Chunker(max_tokens=10).chunk_document(doc)
+    assert len(chunks) == 1
+    assert "x" * 500 in chunks[0].content_text
 
 
 def test_oversized_paragraph_splits_on_blank_lines():

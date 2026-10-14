@@ -120,7 +120,6 @@ class Chunker:
                 return
             crumbs = batch_breadcrumbs()
             chunk = self._make_chunk(batch, crumbs)
-            assert estimate_tokens(chunk.content_text) <= self._max_tokens
             chunks.append(chunk)
             batch = []
 
@@ -165,7 +164,6 @@ class Chunker:
                         )
                     flush_batch()
                     chunk = self._make_chunk([(node, piece)], node.breadcrumbs)
-                    assert estimate_tokens(chunk.content_text) <= self._max_tokens
                     chunks.append(chunk)
                     continue
 
