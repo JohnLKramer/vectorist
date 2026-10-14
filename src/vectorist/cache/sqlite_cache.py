@@ -44,12 +44,18 @@ class SqliteCache:
 
         loop = asyncio.get_running_loop()
         init_event = threading.Event()
+        init_error: list[BaseException | None] = [None]
         work_queue: queue.Queue = queue.Queue()
         db_path = self._db_path
 
         def worker() -> None:
-            conn = _open_connection(db_path)
-            init_event.set()
+            try:
+                conn = _open_connection(db_path)
+            except BaseException as exc:
+                init_error[0] = exc
+                return
+            finally:
+                init_event.set()
             while True:
                 job = work_queue.get()
                 if job is None:
@@ -66,6 +72,8 @@ class SqliteCache:
         thread = threading.Thread(target=worker, name="SqliteCache", daemon=True)
         thread.start()
         await asyncio.to_thread(init_event.wait)
+        if init_error[0] is not None:
+            raise init_error[0]
         self._queue = work_queue
         self._thread = thread
 

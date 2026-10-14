@@ -1,8 +1,10 @@
 import asyncio
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 from vectorist.cache.models import DocumentRecord, DocumentStatus
+from vectorist.cache import sqlite_cache as sqlite_cache_module
 from vectorist.cache.sqlite_cache import DocumentNotFoundError, SqliteCache
 from vectorist.ir.models import IRDocument, ParagraphNode
 
@@ -17,6 +19,27 @@ def _sample_paragraph() -> ParagraphNode:
         raw_content="Hello",
         metadata={},
     )
+
+
+@pytest.mark.asyncio
+async def test_initialize_raises_when_db_path_invalid(tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    cache = SqliteCache(blocker / "cache.db")
+    with pytest.raises(OSError):
+        await asyncio.wait_for(cache.initialize(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_initialize_raises_when_open_connection_fails(tmp_path):
+    cache = SqliteCache(tmp_path / "cache.db")
+
+    def boom(_db_path):
+        raise RuntimeError("open failed")
+
+    with patch.object(sqlite_cache_module, "_open_connection", boom):
+        with pytest.raises(RuntimeError, match="open failed"):
+            await asyncio.wait_for(cache.initialize(), timeout=1.0)
 
 
 @pytest.mark.asyncio
