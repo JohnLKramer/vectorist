@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from vectorist.embeddings.fake import FakeEmbeddingProvider
@@ -114,27 +116,89 @@ async def test_search_filters_by_source_uri_prefix(tmp_path):
     assert [r.chunk_id for r in results] == ["match"]
 
 
+def _unit_vector(*, index: int, dimensions: int = 384) -> list[float]:
+    values = [0.0] * dimensions
+    values[index] = 1.0
+    return values
+
+
+@pytest.mark.asyncio
+async def test_search_prefix_filter_keeps_match_outside_overfetch_knn_window(tmp_path):
+    provider = FakeEmbeddingProvider()
+    store = SqliteVecStore(tmp_path / "vectors.db")
+    await store.initialize()
+
+    query_vector = _unit_vector(index=0)
+    nearer_than_k = 55
+    noise_chunks = [
+        _chunk(
+            chunk_id=f"noise-{i}",
+            document_id=f"d-noise-{i}",
+            chunk_index=0,
+            text=f"noise {i}",
+            source_uri=f"other/docs/noise-{i}.md",
+            embedding=query_vector,
+        )
+        for i in range(nearer_than_k)
+    ]
+    match_chunk = _chunk(
+        chunk_id="prefix-match",
+        document_id="d-match",
+        chunk_index=0,
+        text="acme match",
+        source_uri="acme/docs/target.md",
+        embedding=_unit_vector(index=1),
+    )
+    await store.upsert_chunks([*noise_chunks, match_chunk])
+
+    results = await store.search(
+        query_vector,
+        limit=1,
+        filters={"source_uri_prefix": "acme/docs/"},
+    )
+    assert [r.chunk_id for r in results] == ["prefix-match"]
+    assert results[0].source_uri == "acme/docs/target.md"
+    assert math.isclose(results[0].score, 1.0 - math.sqrt(2.0), rel_tol=1e-5)
+
+
 @pytest.mark.asyncio
 async def test_delete_chunks_by_document_id(tmp_path):
     provider = FakeEmbeddingProvider()
     store = SqliteVecStore(tmp_path / "vectors.db")
     await store.initialize()
 
-    text = "delete me"
+    delete_text = "delete me"
+    keep_text = "keep me"
     await store.upsert_chunks(
         [
             _chunk(
                 chunk_id="c1",
                 document_id="doc-del",
                 chunk_index=0,
-                text=text,
-                source_uri="x.md",
-                embedding=provider.embed_documents([text])[0],
-            )
+                text=delete_text,
+                source_uri="delete.md",
+                embedding=provider.embed_documents([delete_text])[0],
+                chunk_hash="del-hash",
+            ),
+            _chunk(
+                chunk_id="c2",
+                document_id="doc-keep",
+                chunk_index=0,
+                text=keep_text,
+                source_uri="keep.md",
+                embedding=provider.embed_documents([keep_text])[0],
+                chunk_hash="keep-hash",
+            ),
         ]
     )
-    assert await store.get_chunk_hashes("doc-del") == {"c1": "hash"}
+    assert await store.get_chunk_hashes("doc-del") == {"c1": "del-hash"}
+    assert await store.get_chunk_hashes("doc-keep") == {"c2": "keep-hash"}
 
     await store.delete_chunks_by_document_id("doc-del")
     assert await store.get_chunk_hashes("doc-del") == {}
-    assert await store.search(provider.embed_query(text), limit=5) == []
+    assert await store.get_chunk_hashes("doc-keep") == {"c2": "keep-hash"}
+
+    delete_hits = await store.search(provider.embed_query(delete_text), limit=5)
+    assert all(r.document_id != "doc-del" for r in delete_hits)
+    keep_hits = await store.search(provider.embed_query(keep_text), limit=5)
+    assert any(r.chunk_id == "c2" and r.document_id == "doc-keep" for r in keep_hits)

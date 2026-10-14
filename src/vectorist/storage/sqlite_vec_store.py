@@ -119,6 +119,11 @@ def _search_result_from_row(row: sqlite3.Row, distance: float) -> SearchResult:
     )
 
 
+def _count_vectors_sync(conn: sqlite3.Connection) -> int:
+    row = conn.execute(f"SELECT COUNT(*) FROM {_VEC_TABLE}").fetchone()
+    return int(row[0])
+
+
 def _search_sync(
     conn: sqlite3.Connection,
     query_vector: list[float],
@@ -131,9 +136,23 @@ def _search_sync(
     prefix_param: str | None = None
     if filters and "source_uri_prefix" in filters:
         prefix = str(filters["source_uri_prefix"])
-        prefix_clause = "AND json_extract(m.metadata_json, '$.source_uri') LIKE ?"
         prefix_param = f"{prefix}%"
-        knn_k = max(limit * 10, 50)
+        matching = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM chunk_metadata
+            WHERE json_extract(metadata_json, '$.source_uri') LIKE ?
+            """,
+            (prefix_param,),
+        ).fetchone()
+        if matching is None or int(matching[0]) == 0:
+            return []
+        prefix_clause = "AND json_extract(m.metadata_json, '$.source_uri') LIKE ?"
+        # vec0 applies metadata predicates after a global top-k; use full index k
+        # so prefix matches are not dropped when nearer rows fail the filter.
+        knn_k = _count_vectors_sync(conn)
+        if knn_k == 0:
+            return []
 
     params.append(knn_k)
     if prefix_param is not None:
