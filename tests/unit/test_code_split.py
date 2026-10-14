@@ -12,7 +12,10 @@ def test_fallback_splits_on_braces_and_semicolons():
     src = "function a(){ return 1; }\nfunction b(){ return 2; }\n"
     parts = split_code(src, language="unknown", max_tokens=8)
     assert len(parts) >= 2
-    assert all("function" in p or "return" in p for p in parts)
+    assert "".join(parts) == src
+    assert parts[0].rstrip("\n").endswith("}")
+    assert "function a(){ return 1;" in parts[0]
+    assert parts[1].startswith("function b()")
 
 
 def test_python_treesitter_does_not_split_mid_function_when_budget_allows_whole_functions():
@@ -22,7 +25,9 @@ def test_python_treesitter_does_not_split_mid_function_when_budget_allows_whole_
         language="python",
         max_tokens=estimate_tokens("def a():\n    return 1\n") + 1,
     )
-    assert any("def a" in p for p in parts)
+    a_slices = [part for part in parts if "def a" in part or "return 1" in part]
+    assert a_slices
+    assert all("def a" in part and "return 1" in part for part in a_slices)
 
 
 def test_fallback_returns_when_over_budget_line_is_not_last():
@@ -70,6 +75,18 @@ def test_python_class_keeps_method_body_with_signature_when_over_budget():
             assert "return 2" in part
     assert any("def m1" in part and "return 1" in part for part in parts)
     assert any("def m2" in part and "return 2" in part for part in parts)
+
+
+def test_semicolon_inside_string_on_fitting_line_is_not_split_point():
+    src = 'msg = "SELECT 1;\nmore code\n\n' + ("word " * 20)
+    fitting = 'msg = "SELECT 1;\nmore code\n\n'
+    budget = estimate_tokens(fitting)
+    assert estimate_tokens(src) > budget
+    assert estimate_tokens('msg = "SELECT 1;\n') <= budget
+    parts = split_code(src, language="unknown", max_tokens=budget)
+    assert 'msg = "SELECT 1;' in parts[0]
+    assert "more code" in parts[0]
+    assert "word" not in parts[0]
 
 
 def test_semicolon_inside_string_is_not_a_split_point():

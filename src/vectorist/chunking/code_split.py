@@ -239,12 +239,17 @@ def _line_indent(line: str) -> int:
 
 
 def _delimiter_priority_at_line(line: str) -> int | None:
-    stripped = line.strip()
-    if not stripped:
+    if not line.strip():
         return 2
-    if stripped.endswith(";") or stripped.endswith("}"):
+    start = len(line) - len(line.lstrip())
+    end = len(line.rstrip()) - 1
+    last = line[end]
+    if last in ";}" and not _in_string_at(line, end):
         return 0
-    if stripped.startswith("{") or stripped.endswith("{"):
+    first = line[start]
+    if (first == "{" and not _in_string_at(line, start)) or (
+        last == "{" and not _in_string_at(line, end)
+    ):
         return 1
     return None
 
