@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from vectorist.chunking.code_split import split_code
+from vectorist.chunking.table_split import split_table
 from vectorist.chunking.tokenizer import estimate_tokens
-from vectorist.ir.models import CodeBlockNode, IRDocument, IRNode, NodeType, SectionNode
+from vectorist.ir.models import CodeBlockNode, IRDocument, IRNode, NodeType, SectionNode, TableNode
 
 
 def _context_header(breadcrumbs: list[str]) -> str:
@@ -28,8 +29,8 @@ def _oversized_code_or_table(node: IRNode) -> bool:
 
 
 def _split_oversized_content(node: IRNode, limit: int) -> list[str]:
-    if node.node_type == NodeType.TABLE:
-        raise NotImplementedError("oversized table splitting is handled in later tasks")
+    if isinstance(node, TableNode):
+        return split_table(node, limit)
     if isinstance(node, CodeBlockNode):
         return split_code(node.raw_content, node.language, limit)
     raise NotImplementedError("oversized code/table splitting is handled in later tasks")
@@ -137,13 +138,6 @@ class Chunker:
                 pieces = [node.raw_content]
 
             for piece in pieces:
-                piece_tokens = estimate_tokens(piece)
-                if piece_tokens > limit and node.node_type == NodeType.TABLE:
-                    flush_batch()
-                    raise NotImplementedError(
-                        "oversized table splitting is handled in later tasks"
-                    )
-
                 if batch and batch_breadcrumbs() != node.breadcrumbs:
                     flush_batch()
 
@@ -157,11 +151,6 @@ class Chunker:
                     trial_text = _content_text(trial_crumbs, [piece])
 
                 if estimate_tokens(trial_text) > self._max_tokens:
-                    if node.node_type == NodeType.TABLE:
-                        flush_batch()
-                        raise NotImplementedError(
-                            "oversized table splitting is handled in later tasks"
-                        )
                     flush_batch()
                     chunk = self._make_chunk([(node, piece)], node.breadcrumbs)
                     chunks.append(chunk)
