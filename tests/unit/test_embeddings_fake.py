@@ -48,6 +48,15 @@ def test_embed_query_is_deterministic():
     assert provider.embed_query(text) == provider.embed_query(text)
 
 
+def test_embed_query_matches_document_embedding_for_same_text():
+    provider = FakeEmbeddingProvider()
+    text = "hello"
+    document_vector = provider.embed_documents([text])[0]
+    query_vector = provider.embed_query(text)
+    assert query_vector == document_vector
+    assert provider.embed_documents([text])[0] == document_vector
+
+
 def test_provider_reports_dimensions_and_model_id():
     provider = FakeEmbeddingProvider()
     assert provider.dimensions == EXPECTED_DIM

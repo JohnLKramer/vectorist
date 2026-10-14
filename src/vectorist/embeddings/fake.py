@@ -7,11 +7,11 @@ _DEFAULT_DIMENSIONS = 384
 _FAKE_MODEL_ID = "fake/BAAI/bge-small-en-v1.5"
 
 
-def _hash_to_unit_vector(text: str, *, kind: str, dimensions: int) -> list[float]:
+def _hash_to_unit_vector(text: str, *, dimensions: int) -> list[float]:
     values: list[float] = []
     counter = 0
     while len(values) < dimensions:
-        digest = hashlib.sha256(f"{kind}:{text}:{counter}".encode("utf-8")).digest()
+        digest = hashlib.sha256(f"{text}:{counter}".encode("utf-8")).digest()
         for offset in range(0, len(digest) - 3, 4):
             if len(values) >= dimensions:
                 break
@@ -40,7 +40,7 @@ class FakeEmbeddingProvider:
         return _FAKE_MODEL_ID
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [_hash_to_unit_vector(text, kind="document", dimensions=self._dimensions) for text in texts]
+        return [_hash_to_unit_vector(text, dimensions=self._dimensions) for text in texts]
 
     def embed_query(self, text: str) -> list[float]:
-        return _hash_to_unit_vector(text, kind="query", dimensions=self._dimensions)
+        return _hash_to_unit_vector(text, dimensions=self._dimensions)
