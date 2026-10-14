@@ -45,11 +45,32 @@ def test_split_table_40_rows_sticky_headers_in_every_slice(wide_table_md: str):
 def test_continued_slices_use_exact_header_pattern(wide_table_md: str):
     table = _table_from_markdown(wide_table_md)
     table = table.model_copy(update={"caption": "Quarterly KPIs"})
-    slices = split_table(table, max_tokens=60, rows_per_group=5)
-    assert len(slices) >= 2
-    assert slices[0].startswith("[Table: Quarterly KPIs]")
-    assert "(Continued - Rows" in slices[1]
-    assert "[Table: Quarterly KPIs (Continued - Rows" in slices[1]
+    rows_per_group = 5
+    slices = split_table(table, max_tokens=60, rows_per_group=rows_per_group)
+    assert len(slices) == len(table.rows) // rows_per_group
+
+    header_line = "| Metric | Value |"
+    separator_line = "| --- | --- |"
+
+    for slice_index, slice_text in enumerate(slices):
+        lines = slice_text.split("\n")
+        row_start = slice_index * rows_per_group + 1
+        row_end = row_start + rows_per_group - 1
+        expected_rows = table.rows[row_start - 1 : row_end]
+
+        if slice_index == 0:
+            assert lines[0] == "[Table: Quarterly KPIs]"
+        else:
+            assert lines[0] == (
+                f"[Table: Quarterly KPIs (Continued - Rows {row_start} to {row_end})]"
+            )
+
+        assert lines[1] == header_line
+        assert lines[2] == separator_line
+        data_lines = lines[3:]
+        assert len(data_lines) == rows_per_group
+        for expected_row, data_line in zip(expected_rows, data_lines, strict=True):
+            assert data_line == f"| {expected_row[0]} | {expected_row[1]} |"
 
 
 def test_chunker_splits_oversized_table_into_multiple_chunks(wide_table_md: str):

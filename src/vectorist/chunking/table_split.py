@@ -111,13 +111,16 @@ def split_table(
     index = 0
     is_first = True
     while index < len(node.rows):
-        count = _largest_row_group(
-            node,
-            index,
-            max_tokens,
-            is_first=is_first,
-            cap=rows_per_group,
-        )
+        if rows_per_group is not None:
+            count = min(rows_per_group, len(node.rows) - index)
+        else:
+            count = _largest_row_group(
+                node,
+                index,
+                max_tokens,
+                is_first=is_first,
+                cap=None,
+            )
         chunk_rows = node.rows[index : index + count]
         row_start = index + 1
         row_end = index + count
