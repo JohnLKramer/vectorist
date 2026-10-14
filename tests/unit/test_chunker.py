@@ -200,7 +200,7 @@ def test_packs_paragraph_and_following_code_in_same_h2_section():
     assert chunk.breadcrumbs == crumbs
 
 
-def test_oversized_code_block_raises_not_implemented():
+def test_oversized_code_block_splits_into_multiple_chunks():
     crumbs = ["doc.md"]
     root = _section(
         "root",
@@ -224,8 +224,13 @@ def test_oversized_code_block_raises_not_implemented():
         nodes={"root": root, "code": code},
     )
 
-    with pytest.raises(NotImplementedError):
-        Chunker(max_tokens=50).chunk_document(doc)
+    chunks = Chunker(max_tokens=50).chunk_document(doc)
+    assert len(chunks) >= 2
+    joined = " ".join(c.content_text for c in chunks)
+    assert "word" in joined
+    for chunk in chunks:
+        assert chunk.content_text.startswith("[Context: ")
+        assert estimate_tokens(chunk.content_text) <= 50
 
 
 def test_oversized_paragraph_splits_on_blank_lines():
