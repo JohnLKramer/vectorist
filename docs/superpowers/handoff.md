@@ -32,7 +32,8 @@ starts at `89673ab`.
 2. Tasks 1–10 are complete and review-clean. Do not redo them.
 3. Task 11 is complete (commits `89673ab..f17705a`, reviews clean). Do not
    redo it.
-4. Implement Tasks 12, 13, and 14 in order. Each task's requirements are
+4. Task 12 is complete (commit `9173a23`, review clean). Do not redo it.
+   Implement Tasks 13 and 14 in order. Each task's requirements are
    extracted with the skill script `task-brief` into
    `.superpowers/sdd/task-N-brief.md`. Hand the implementer that file, not
    the whole plan.
