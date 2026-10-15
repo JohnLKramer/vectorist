@@ -7,9 +7,11 @@ Phase 1 serves HTTP ingest and search for Markdown documents. The process loads 
 Python 3.12 or newer. From the repository root:
 
 ```bash
-uv sync
+uv sync --extra dev
 uv run pytest
 ```
+
+pytest, pytest-asyncio, and httpx are in the `dev` extra. Plain `uv sync` does not install them, and it removes them if they are already present.
 
 `uv run pytest` is the default suite. It uses SQLite and does not need Docker or Postgres. Postgres-backed tests, when present, stay optional.
 
@@ -33,7 +35,9 @@ Set the environment variables below before starting. Required paths have no defa
 | `VECTORIST_DATABASE_URL` | for `pgvector` | | Postgres URL. Startup fails if the backend is `pgvector` and this is unset |
 | `VECTORIST_EMBEDDER` | no | `fastembed` | `fastembed` or `fake` |
 
-`sqlite` is the default vector store. `pgvector` uses `VECTORIST_DATABASE_URL`. Any other backend name fails startup.
+`sqlite` is the default vector store. `pgvector` uses `VECTORIST_DATABASE_URL`. Any other backend name fails startup. Any embedder other than `fastembed` or `fake` also fails startup. The match is case-sensitive.
+
+Both stores apply their schema migrations at startup. The SQL ships inside the package under `vectorist/migrations/sql/`, so an installed copy finds it the same way a source checkout does. Startup fails if that directory has no migration files.
 
 `fastembed` loads `BAAI/bge-small-en-v1.5` (384 dimensions) on the first embed. `fake` builds deterministic 384-dimension hash vectors and is what the test suite sets. Do not point `fake` at a store that was filled with FastEmbed vectors.
 
@@ -108,7 +112,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/search \
 | Field | Meaning |
 | :--- | :--- |
 | `query` | Search text |
-| `limit` | Optional. Defaults to 10 |
+| `limit` | Optional. Defaults to 10. Must be between 1 and 4096. Other values return 422 |
 | `filters.source_uri_prefix` | Optional. Keeps hits whose `source_uri` starts with this string |
 
 ```json
@@ -121,13 +125,30 @@ curl -s -X POST http://127.0.0.1:8080/v1/search \
       "content_text": "…",
       "score": 0.8,
       "breadcrumbs": ["pooling.md", "Pool"],
-      "metadata": {}
+      "metadata": {
+        "line_range": [3, 3],
+        "node_types": ["PARAGRAPH"]
+      }
     }
   ]
 }
 ```
 
 `score` is `1` minus the vector distance, so a closer chunk scores higher. `breadcrumbs` are the heading path stored with the chunk.
+
+`metadata` holds:
+
+| Key | Meaning |
+| :--- | :--- |
+| `line_range` | First and last source line of the chunk, 1-based and inclusive |
+| `node_types` | Types of the IR nodes in the chunk, such as `PARAGRAPH`, `CODE_BLOCK`, `TABLE`, or `MEDIA` |
+| `language` | Only for chunks that contain code. The language of the first code block in the chunk, or `unknown` |
+
+Chunks indexed before a server version added a key keep their old metadata until their text changes.
+
+With `filters.source_uri_prefix`, the sqlite-vec store compares the query against every chunk whose `source_uri` matches, so the nearest matching chunks are returned however many other chunks the store holds.
+
+Markdown indented code blocks become code blocks, like fenced ones without a language. Raw HTML blocks are kept as paragraph text. Their tags are not parsed.
 
 ## Health
 
@@ -142,4 +163,6 @@ curl -s -X POST http://127.0.0.1:8080/v1/search \
 }
 ```
 
-After a successful startup every field is `ok`. The response model also allows `status` to be `degraded`. The server does not probe components in the background. A process that failed to initialize the cache, the vector store, or the embedder does not stay up to answer this route.
+Each request checks the cache and the vector store through the connections they opened at startup. The SQLite backends run a query on their worker thread. The pgvector backend runs `SELECT 1` on its existing pool. A check that raises or takes longer than two seconds sets that field to `error` and `status` to `degraded`. The response code is still 200. `embedder` is always `ok`, because the model loads on the first embed.
+
+The server does not probe components in the background. A process that failed to initialize the cache, the vector store, or the embedder does not stay up to answer this route.

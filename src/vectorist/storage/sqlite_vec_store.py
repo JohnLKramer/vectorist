@@ -10,12 +10,10 @@ from typing import Any
 
 import sqlite_vec
 
-from vectorist.migrations.runner import apply_migrations
+from vectorist.migrations.runner import apply_migrations, packaged_migrations_dir
 from vectorist.storage.models import ChunkRecord, SearchResult
 
-_SQLITE_MIGRATIONS_DIR = (
-    Path(__file__).resolve().parents[3] / "migrations" / "sqlite"
-)
+_SQLITE_MIGRATIONS_DIR = packaged_migrations_dir("sqlite")
 _VEC_DIMENSIONS = 384
 _VEC_TABLE = "chunk_vectors"
 _VEC_TABLE_DDL = f"""
@@ -132,9 +130,8 @@ def _search_result_from_row(row: sqlite3.Row, distance: float) -> SearchResult:
     )
 
 
-def _count_vectors_sync(conn: sqlite3.Connection) -> int:
-    row = conn.execute(f"SELECT COUNT(*) FROM {_VEC_TABLE}").fetchone()
-    return int(row[0])
+def _ping_sync(conn: sqlite3.Connection) -> None:
+    conn.execute(f"SELECT chunk_id FROM {_VEC_TABLE} LIMIT 1").fetchone()
 
 
 def _search_sync(
@@ -143,34 +140,32 @@ def _search_sync(
     limit: int,
     filters: dict[str, Any] | None,
 ) -> list[SearchResult]:
-    knn_k = limit
-    params: list[Any] = [sqlite_vec.serialize_float32(query_vector)]
-    prefix_clause = ""
-    prefix_param: str | None = None
+    query_blob = sqlite_vec.serialize_float32(query_vector)
     if filters and "source_uri_prefix" in filters:
-        prefix = str(filters["source_uri_prefix"])
-        prefix_param = f"{prefix}%"
-        matching = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM chunk_metadata
-            WHERE json_extract(metadata_json, '$.source_uri') LIKE ?
+        prefix_param = f"{filters['source_uri_prefix']}%"
+        # vec0 KNN applies metadata predicates after its top-k (capped at 4096),
+        # so filtered search scans the matching rows exactly instead.
+        # vec_distance_l2 matches the vec0 table's default distance.
+        rows = conn.execute(
+            f"""
+            SELECT
+                m.chunk_id,
+                m.document_id,
+                m.content_text,
+                m.metadata_json,
+                vec_distance_l2(v.embedding, ?) AS distance
+            FROM chunk_metadata m
+            INNER JOIN {_VEC_TABLE} v ON v.chunk_id = m.chunk_id
+            WHERE json_extract(m.metadata_json, '$.source_uri') LIKE ?
+            ORDER BY distance
+            LIMIT ?
             """,
-            (prefix_param,),
-        ).fetchone()
-        if matching is None or int(matching[0]) == 0:
-            return []
-        prefix_clause = "AND json_extract(m.metadata_json, '$.source_uri') LIKE ?"
-        # vec0 applies metadata predicates after a global top-k; use full index k
-        # so prefix matches are not dropped when nearer rows fail the filter.
-        knn_k = _count_vectors_sync(conn)
-        if knn_k == 0:
-            return []
+            (query_blob, prefix_param, limit),
+        ).fetchall()
+        return [_search_result_from_row(row, row["distance"]) for row in rows]
 
-    params.append(knn_k)
-    if prefix_param is not None:
-        params.append(prefix_param)
-    query = f"""
+    rows = conn.execute(
+        f"""
         SELECT
             m.chunk_id,
             m.document_id,
@@ -181,12 +176,11 @@ def _search_sync(
         INNER JOIN chunk_metadata m ON m.chunk_id = {_VEC_TABLE}.chunk_id
         WHERE {_VEC_TABLE}.embedding MATCH ?
           AND k = ?
-          {prefix_clause}
         ORDER BY distance
         LIMIT ?
-    """
-    params.append(limit)
-    rows = conn.execute(query, params).fetchall()
+        """,
+        (query_blob, limit, limit),
+    ).fetchall()
     return [_search_result_from_row(row, row["distance"]) for row in rows]
 
 
@@ -223,7 +217,10 @@ class SqliteVecStore:
                 try:
                     result = fn(conn, *args, **kwargs)
                 except BaseException as exc:
-                    loop.call_soon_threadsafe(future.set_exception, exc)
+                    try:
+                        conn.rollback()
+                    finally:
+                        loop.call_soon_threadsafe(future.set_exception, exc)
                 else:
                     loop.call_soon_threadsafe(future.set_result, result)
 
@@ -242,6 +239,11 @@ class SqliteVecStore:
         future: asyncio.Future = loop.create_future()
         self._queue.put((future, fn, args, kwargs))
         return await future
+
+    async def ping(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            raise RuntimeError("SqliteVecStore worker thread is not running")
+        await self._run(_ping_sync)
 
     async def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         await self._run(_upsert_chunks_sync, chunks)

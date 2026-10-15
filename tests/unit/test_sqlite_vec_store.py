@@ -1,5 +1,7 @@
+import asyncio
 import math
 import sqlite3
+from dataclasses import replace
 
 import pytest
 import sqlite_vec
@@ -260,3 +262,79 @@ async def test_delete_chunks_by_ids_removes_vec_and_metadata(tmp_path):
     assert await store.get_chunk_hashes("doc-1") == {"keep-id": "keep-hash"}
     assert _table_ids(db_path, "chunk_metadata", "chunk_id") == {"keep-id"}
     assert _table_ids(db_path, "chunk_vectors", "chunk_id") == {"keep-id"}
+
+
+@pytest.mark.asyncio
+async def test_failed_vector_insert_rolls_back_metadata_so_retry_indexes_chunk(
+    tmp_path,
+):
+    store = SqliteVecStore(tmp_path / "vectors.db")
+    await store.initialize()
+
+    wrong_dimensions = _chunk(
+        chunk_id="c1",
+        document_id="doc-1",
+        chunk_index=0,
+        text="retry me",
+        source_uri="doc.md",
+        embedding=[1.0, 0.0, 0.0],
+        chunk_hash="h1",
+    )
+    with pytest.raises(sqlite3.Error):
+        await store.upsert_chunks([wrong_dimensions])
+
+    assert await store.get_chunk_hashes("doc-1") == {}
+
+    query_vector = _unit_vector(index=0)
+    await store.upsert_chunks([replace(wrong_dimensions, embedding=query_vector)])
+    results = await store.search(query_vector, limit=1)
+    assert [r.chunk_id for r in results] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_prefix_filter_finds_far_match_beyond_vec0_k_cap(tmp_path):
+    store = SqliteVecStore(tmp_path / "vectors.db")
+    await store.initialize()
+
+    query_vector = _unit_vector(index=0)
+    noise_chunks = [
+        _chunk(
+            chunk_id=f"noise-{i}",
+            document_id=f"d-noise-{i}",
+            chunk_index=0,
+            text=f"noise {i}",
+            source_uri=f"other/docs/noise-{i}.md",
+            embedding=query_vector,
+        )
+        for i in range(4100)
+    ]
+    match_chunk = _chunk(
+        chunk_id="prefix-match",
+        document_id="d-match",
+        chunk_index=0,
+        text="acme match",
+        source_uri="acme/docs/target.md",
+        embedding=_unit_vector(index=1),
+    )
+    await store.upsert_chunks([*noise_chunks, match_chunk])
+
+    results = await store.search(
+        query_vector,
+        limit=1,
+        filters={"source_uri_prefix": "acme/docs/"},
+    )
+    assert [r.chunk_id for r in results] == ["prefix-match"]
+    assert math.isclose(results[0].score, 1.0 - math.sqrt(2.0), rel_tol=1e-5)
+
+
+@pytest.mark.asyncio
+async def test_ping_succeeds_while_worker_runs_and_fails_after_it_stops(tmp_path):
+    store = SqliteVecStore(tmp_path / "vectors.db")
+    await store.initialize()
+    await store.ping()
+
+    store._queue.put(None)
+    await asyncio.to_thread(store._thread.join, 1.0)
+
+    with pytest.raises(RuntimeError, match="worker thread is not running"):
+        await store.ping()

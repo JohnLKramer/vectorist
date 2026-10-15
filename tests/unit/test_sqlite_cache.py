@@ -204,3 +204,16 @@ async def test_overlapping_operations(tmp_path):
         assert row is not None
         assert row.status == DocumentStatus.PARSED
         assert row.content_hash == f"h{i}"
+
+
+@pytest.mark.asyncio
+async def test_ping_succeeds_while_worker_runs_and_fails_after_it_stops(tmp_path):
+    cache = SqliteCache(tmp_path / "cache.db")
+    await cache.initialize()
+    await cache.ping()
+
+    cache._queue.put(None)
+    await asyncio.to_thread(cache._thread.join, 1.0)
+
+    with pytest.raises(RuntimeError, match="worker thread is not running"):
+        await cache.ping()

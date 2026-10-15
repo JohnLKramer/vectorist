@@ -195,3 +195,33 @@ def test_mixed_paragraph_splits_image_to_media_node():
     assert len(paragraphs) == 2
     texts = sorted(p.raw_content.strip() for p in paragraphs)
     assert texts == ["See", "here."]
+
+
+def test_indented_code_and_html_blocks_survive_into_ir():
+    content = (
+        "# Legacy\n"
+        "\n"
+        "Some prose.\n"
+        "\n"
+        "    indented_code = 1\n"
+        "    print(indented_code)\n"
+        "\n"
+        "<div class=\"note\">\n"
+        "Raw HTML note\n"
+        "</div>\n"
+    )
+    doc = MarkdownAdapter().parse("docs/legacy.md", content)
+
+    code_nodes = [n for n in doc.nodes.values() if isinstance(n, CodeBlockNode)]
+    assert len(code_nodes) == 1
+    assert code_nodes[0].raw_content == "indented_code = 1\nprint(indented_code)\n"
+    assert code_nodes[0].line_range == (5, 6)
+
+    html_nodes = [
+        n
+        for n in doc.nodes.values()
+        if isinstance(n, ParagraphNode) and "Raw HTML note" in n.raw_content
+    ]
+    assert len(html_nodes) == 1
+    assert html_nodes[0].raw_content.startswith('<div class="note">')
+    assert_all_nodes_reachable(doc)

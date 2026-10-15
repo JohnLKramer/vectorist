@@ -307,8 +307,13 @@ class _IRBuilder:
                     self._process_inline_paragraph(inline, _line_range(tok))
                 i += 3
                 continue
-            if tok.type == "fence":
+            if tok.type in ("fence", "code_block"):
                 self._add_code_block(tok)
+                i += 1
+                continue
+            if tok.type == "html_block":
+                if tok.content.strip():
+                    self._add_paragraph(tok.content.rstrip("\n"), _line_range(tok))
                 i += 1
                 continue
             if tok.type == "table_open":

@@ -4,6 +4,9 @@ Scans ``*.sql`` files in ``migrations_dir``, parses ``--changeset author:id`` ma
 and applies pending SQL against a sqlite3 connection. Tracks applied ids in
 ``_schema_migrations``.
 
+The SQL ships inside the package under ``vectorist/migrations/sql/<dialect>``;
+``packaged_migrations_dir`` resolves it from wherever the package is installed.
+
 Note: sqlite-vec ``CREATE VIRTUAL TABLE ... USING vec0`` is not run here; that
 happens in ``SqliteVecStore.initialize()`` after the extension is loaded.
 """
@@ -13,6 +16,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 
 _CHANGESET_RE = re.compile(r"^--changeset\s+(\S+:\S+)\s*$", re.MULTILINE)
@@ -23,6 +27,22 @@ CREATE TABLE IF NOT EXISTS _schema_migrations (
     applied_at TEXT NOT NULL
 )
 """
+
+
+def packaged_migrations_dir(dialect: str) -> Path:
+    directory = Path(str(resources.files("vectorist.migrations") / "sql" / dialect))
+    if not directory.is_dir():
+        raise FileNotFoundError(
+            f"packaged migrations not found for {dialect}: {directory}"
+        )
+    return directory
+
+
+def migration_files(migrations_dir: Path) -> list[Path]:
+    files = sorted(migrations_dir.glob("*.sql"))
+    if not files:
+        raise FileNotFoundError(f"no migration files in {migrations_dir}")
+    return files
 
 
 def _ensure_schema_migrations(conn: sqlite3.Connection) -> None:
@@ -56,13 +76,14 @@ def _parse_changesets(sql_text: str) -> list[tuple[str, str]]:
 
 def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path) -> list[str]:
     """Apply pending Liquibase-formatted SQL migrations; return newly applied changeset ids."""
+    files = migration_files(migrations_dir)
     _ensure_schema_migrations(conn)
     already = _applied_ids(conn)
 
     applied: list[str] = []
     now = datetime.now(timezone.utc).isoformat()
 
-    for path in sorted(migrations_dir.glob("*.sql")):
+    for path in files:
         sql_text = path.read_text(encoding="utf-8")
         for changeset_id, body in _parse_changesets(sql_text):
             if changeset_id in already:

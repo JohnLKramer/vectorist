@@ -7,12 +7,14 @@ from typing import Any
 
 import asyncpg
 
-from vectorist.migrations.runner import _parse_changesets
+from vectorist.migrations.runner import (
+    _parse_changesets,
+    migration_files,
+    packaged_migrations_dir,
+)
 from vectorist.storage.models import ChunkRecord, SearchResult
 
-_POSTGRES_MIGRATIONS_DIR = (
-    Path(__file__).resolve().parents[3] / "migrations" / "postgres"
-)
+_POSTGRES_MIGRATIONS_DIR = packaged_migrations_dir("postgres")
 
 _SCHEMA_MIGRATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -48,7 +50,7 @@ async def _apply_postgres_migrations(
     applied: list[str] = []
     now = datetime.now(timezone.utc)
 
-    for path in sorted(migrations_dir.glob("*.sql")):
+    for path in migration_files(migrations_dir):
         sql_text = path.read_text(encoding="utf-8")
         for changeset_id, body in _parse_changesets(sql_text):
             if changeset_id in already:
@@ -112,6 +114,10 @@ class PgVectorStore:
         if self._pool is None:
             raise RuntimeError("PgVectorStore.initialize() must be called first")
         return self._pool
+
+    async def ping(self) -> None:
+        pool = self._pool_required()
+        await pool.fetchval("SELECT 1")
 
     async def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         pool = self._pool_required()

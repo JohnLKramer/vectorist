@@ -1,3 +1,5 @@
+import threading
+
 from vectorist.adapters.markdown import MarkdownAdapter
 from vectorist.cache.models import DocumentStatus
 from vectorist.cache.sqlite_cache import SqliteCache
@@ -23,6 +25,7 @@ class RecordingEmbedder:
     def __init__(self) -> None:
         self._inner = FakeEmbeddingProvider()
         self.document_calls: list[list[str]] = []
+        self.document_call_threads: list[int] = []
 
     @property
     def dimensions(self) -> int:
@@ -34,6 +37,7 @@ class RecordingEmbedder:
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         self.document_calls.append(list(texts))
+        self.document_call_threads.append(threading.get_ident())
         return self._inner.embed_documents(texts)
 
     def embed_query(self, text: str) -> list[float]:
@@ -57,6 +61,29 @@ class FlakyEmbedder:
         if self.failures_left:
             self.failures_left -= 1
             raise RuntimeError("embed boom")
+        return self._inner.embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._inner.embed_query(text)
+
+
+class WrongDimensionsOnceEmbedder:
+    def __init__(self) -> None:
+        self._inner = FakeEmbeddingProvider()
+        self.failures_left = 1
+
+    @property
+    def dimensions(self) -> int:
+        return self._inner.dimensions
+
+    @property
+    def model_id(self) -> str:
+        return self._inner.model_id
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if self.failures_left:
+            self.failures_left -= 1
+            return [[1.0, 0.0, 0.0] for _ in texts]
         return self._inner.embed_documents(texts)
 
     def embed_query(self, text: str) -> list[float]:
@@ -109,6 +136,9 @@ async def test_ingest_pooling_twice_skips_second_and_search_returns_chunk(
         "Overview",
     ]
     assert "Connection pooling reuses database connections" in matched[0].content_text
+    assert matched[0].metadata["line_range"] == [5, 17]
+    assert matched[0].metadata["language"] == "python"
+    assert "CODE_BLOCK" in matched[0].metadata["node_types"]
 
 
 async def test_changed_document_reuses_id_and_is_not_skipped(tmp_path):
@@ -255,3 +285,33 @@ async def test_same_hash_parsed_document_is_ingested_again(tmp_path, fixtures_di
     stored = await cache.get_document_by_uri(source_uri)
     assert stored is not None
     assert stored.status == DocumentStatus.INDEXED
+
+
+async def test_failed_vector_write_is_rolled_back_so_retry_indexes_chunks(
+    tmp_path, fixtures_dir
+):
+    embedder = WrongDimensionsOnceEmbedder()
+    cache, store, _embedder, service = await _open_service(tmp_path, embedder)
+    content = (fixtures_dir / "pooling.md").read_text(encoding="utf-8")
+    source_uri = "acme/docs/pooling.md"
+
+    failed = await service.ingest_document(source_uri, content)
+    assert failed.status == "failed"
+    assert failed.document_id is not None
+    assert await store.get_chunk_hashes(failed.document_id) == {}
+
+    retried = await service.ingest_document(source_uri, content)
+    assert retried.status == "indexed"
+    hits = await store.search(embedder.embed_query("connection pooling"), limit=5)
+    assert any(hit.document_id == failed.document_id for hit in hits)
+
+
+async def test_embed_documents_runs_off_the_event_loop_thread(tmp_path):
+    embedder = RecordingEmbedder()
+    _cache, _store, _embedder, service = await _open_service(tmp_path, embedder)
+
+    result = await service.ingest_document("guide.md", _TWO_SECTIONS)
+
+    assert result.status == "indexed"
+    assert embedder.document_call_threads
+    assert threading.get_ident() not in embedder.document_call_threads

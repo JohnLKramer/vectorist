@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -100,8 +101,9 @@ class IngestService:
 
             embeddings: list[list[float]] = []
             if changed:
-                embeddings = self._embedder.embed_documents(
-                    [chunk.content_text for _, _, chunk in changed]
+                embeddings = await asyncio.to_thread(
+                    self._embedder.embed_documents,
+                    [chunk.content_text for _, _, chunk in changed],
                 )
 
             if removed_ids:
@@ -115,6 +117,7 @@ class IngestService:
                     metadata = dict(chunk.metadata)
                     metadata["source_uri"] = source_uri
                     metadata["breadcrumbs"] = list(chunk.breadcrumbs)
+                    metadata["line_range"] = list(chunk.line_range)
                     records.append(
                         ChunkRecord(
                             id=chunk_id,

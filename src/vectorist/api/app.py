@@ -33,20 +33,22 @@ def _build_store(settings: Settings) -> VectorStoreProtocol:
 def _build_embedder(settings: Settings) -> EmbeddingProviderProtocol:
     if settings.embedder == "fake":
         return FakeEmbeddingProvider()
-    from vectorist.embeddings.fastembed_provider import FastEmbedProvider
+    if settings.embedder == "fastembed":
+        from vectorist.embeddings.fastembed_provider import FastEmbedProvider
 
-    return FastEmbedProvider()
+        return FastEmbedProvider()
+    raise RuntimeError(f"unsupported embedder: {settings.embedder}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings()
+    embedder = _build_embedder(settings)
     cache = SqliteCache(settings.cache_path)
     store = _build_store(settings)
     try:
         await cache.initialize()
         await store.initialize()
-        embedder = _build_embedder(settings)
         app.state.cache = cache
         app.state.store = store
         app.state.embedder = embedder

@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Request
 
 from vectorist.api.schemas import SearchHit, SearchRequest, SearchResponse
@@ -20,7 +22,9 @@ def _hit(result: SearchResult) -> SearchHit:
 
 @router.post("/v1/search", response_model=SearchResponse)
 async def search(body: SearchRequest, request: Request) -> SearchResponse:
-    query_vector = request.app.state.embedder.embed_query(body.query)
+    query_vector = await asyncio.to_thread(
+        request.app.state.embedder.embed_query, body.query
+    )
     hits = await request.app.state.store.search(
         query_vector,
         limit=body.limit,

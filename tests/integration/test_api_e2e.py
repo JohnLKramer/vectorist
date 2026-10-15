@@ -1,4 +1,5 @@
 import json
+import threading
 
 import httpx
 import pytest
@@ -45,7 +46,9 @@ async def test_ingest_stream_and_search(tmp_path, monkeypatch, fixtures_dir):
             assert "content_text" in hit
             assert "score" in hit
             assert "breadcrumbs" in hit
-            assert "metadata" in hit
+            assert hit["metadata"]["line_range"] == [5, 17]
+            assert hit["metadata"]["language"] == "python"
+            assert "CODE_BLOCK" in hit["metadata"]["node_types"]
 
 
 async def test_ingest_stream_skips_blank_lines_and_reports_malformed_lines(
@@ -188,3 +191,118 @@ async def test_pgvector_without_database_url_fails_at_startup(tmp_path, monkeypa
     with pytest.raises(RuntimeError, match="VECTORIST_DATABASE_URL"):
         async with app.router.lifespan_context(app):
             pass
+
+
+@pytest.mark.parametrize("limit", [0, -1, 4097])
+async def test_search_rejects_out_of_range_limit(tmp_path, monkeypatch, limit):
+    _configure_env(monkeypatch, tmp_path)
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            response = await client.post(
+                "/v1/search", json={"query": "connection pool", "limit": limit}
+            )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("limit", [1, 4096])
+async def test_search_accepts_limit_bounds(tmp_path, monkeypatch, limit):
+    _configure_env(monkeypatch, tmp_path)
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            await client.post(
+                "/v1/ingest",
+                json={"source_uri": "a.md", "content": "# A\n\nconnection pool\n"},
+            )
+            response = await client.post(
+                "/v1/search", json={"query": "connection pool", "limit": limit}
+            )
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 1
+
+
+async def test_indented_code_and_html_blocks_are_searchable(tmp_path, monkeypatch):
+    _configure_env(monkeypatch, tmp_path)
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+    content = (
+        "# Legacy\n\n"
+        "    indented_code = 1\n\n"
+        "<div>Raw HTML note</div>\n"
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            created = await client.post(
+                "/v1/ingest", json={"source_uri": "docs/legacy.md", "content": content}
+            )
+            assert created.json()["status"] == "indexed"
+            search = await client.post(
+                "/v1/search", json={"query": "indented_code", "limit": 10}
+            )
+    texts = "\n".join(hit["content_text"] for hit in search.json()["results"])
+    assert "indented_code = 1" in texts
+    assert "Raw HTML note" in texts
+
+
+async def test_search_embeds_query_off_the_event_loop_thread(tmp_path, monkeypatch):
+    _configure_env(monkeypatch, tmp_path)
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+    query_threads: list[int] = []
+    async with app.router.lifespan_context(app):
+        embedder = app.state.embedder
+        original = embedder.embed_query
+
+        def recording_embed_query(text: str) -> list[float]:
+            query_threads.append(threading.get_ident())
+            return original(text)
+
+        monkeypatch.setattr(embedder, "embed_query", recording_embed_query)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            response = await client.post("/v1/search", json={"query": "pool"})
+    assert response.status_code == 200
+    assert query_threads
+    assert threading.get_ident() not in query_threads
+
+
+async def test_unknown_embedder_fails_at_startup(tmp_path, monkeypatch):
+    _configure_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("VECTORIST_EMBEDDER", "Fake")
+    import vectorist.embeddings.fastembed_provider as fastembed_provider
+
+    def must_not_construct(*args, **kwargs):
+        raise AssertionError("FastEmbedProvider must not be constructed")
+
+    monkeypatch.setattr(fastembed_provider, "FastEmbedProvider", must_not_construct)
+    app = create_app()
+    with pytest.raises(RuntimeError, match="unsupported embedder: Fake"):
+        async with app.router.lifespan_context(app):
+            pass
+
+
+@pytest.mark.parametrize("component", ["cache", "store"])
+async def test_health_reports_degraded_when_a_component_check_fails(
+    tmp_path, monkeypatch, component
+):
+    _configure_env(monkeypatch, tmp_path)
+    app = create_app()
+    transport = httpx.ASGITransport(app=app)
+
+    async def failing_ping() -> None:
+        raise RuntimeError("backend down")
+
+    async with app.router.lifespan_context(app):
+        monkeypatch.setattr(getattr(app.state, component), "ping", failing_ping)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            health = await client.get("/v1/health")
+    assert health.status_code == 200
+    body = health.json()
+    assert body["status"] == "degraded"
+    failed_field = "cache" if component == "cache" else "vector_store"
+    healthy_field = "vector_store" if component == "cache" else "cache"
+    assert body[failed_field] == "error"
+    assert body[healthy_field] == "ok"
+    assert body["embedder"] == "ok"

@@ -222,6 +222,9 @@ class Chunker:
         metadata: dict[str, Any] = {}
         for n in nodes:
             metadata.update(n.metadata)
+        code_languages = [n.language for n in nodes if isinstance(n, CodeBlockNode)]
+        if code_languages:
+            metadata["language"] = code_languages[0]
 
         content_text = _content_text(breadcrumbs, texts)
         return Chunk(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from fastembed import TextEmbedding
@@ -14,6 +15,7 @@ class FastEmbedProvider:
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         self._model_name = model_name
         self._model: TextEmbedding | None = None
+        self._model_lock = threading.Lock()
 
     @property
     def dimensions(self) -> int:
@@ -24,9 +26,12 @@ class FastEmbedProvider:
         return self._model_name
 
     def _ensure_model(self) -> TextEmbedding:
-        if self._model is None:
-            self._model = TextEmbedding(model_name=self._model_name, lazy_load=True)
-        return self._model
+        with self._model_lock:
+            if self._model is None:
+                self._model = TextEmbedding(
+                    model_name=self._model_name, lazy_load=True
+                )
+            return self._model
 
     def _to_vectors(self, arrays: Iterable[np.ndarray]) -> list[list[float]]:
         return [array.tolist() for array in arrays]

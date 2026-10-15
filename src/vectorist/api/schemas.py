@@ -27,7 +27,7 @@ class DocumentResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    limit: int = 10
+    limit: int = Field(10, ge=1, le=4096)
     filters: dict[str, Any] | None = None
 
 

@@ -10,11 +10,9 @@ from vectorist.cache.models import DocumentRecord, DocumentStatus
 from vectorist.hashing import sha256_text
 from vectorist.ir.models import IRDocument
 from vectorist.ir.serialize import ir_from_json, ir_to_json
-from vectorist.migrations.runner import apply_migrations
+from vectorist.migrations.runner import apply_migrations, packaged_migrations_dir
 
-_SQLITE_MIGRATIONS_DIR = (
-    Path(__file__).resolve().parents[3] / "migrations" / "sqlite"
-)
+_SQLITE_MIGRATIONS_DIR = packaged_migrations_dir("sqlite")
 
 
 class DocumentNotFoundError(LookupError):
@@ -65,7 +63,10 @@ class SqliteCache:
                 try:
                     result = fn(conn, *args, **kwargs)
                 except BaseException as exc:
-                    loop.call_soon_threadsafe(future.set_exception, exc)
+                    try:
+                        conn.rollback()
+                    finally:
+                        loop.call_soon_threadsafe(future.set_exception, exc)
                 else:
                     loop.call_soon_threadsafe(future.set_result, result)
 
@@ -84,6 +85,11 @@ class SqliteCache:
         future: asyncio.Future = loop.create_future()
         self._queue.put((future, fn, args, kwargs))
         return await future
+
+    async def ping(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            raise RuntimeError("SqliteCache worker thread is not running")
+        await self._run(_ping_sync)
 
     async def get_document_by_uri(self, source_uri: str) -> DocumentRecord | None:
         return await self._run(_get_document_by_uri_sync, source_uri)
@@ -112,6 +118,10 @@ class SqliteCache:
         await self._run(
             _update_status_sync, document_id, status, error_message
         )
+
+
+def _ping_sync(conn: sqlite3.Connection) -> None:
+    conn.execute("SELECT 1 FROM documents LIMIT 1").fetchone()
 
 
 def _get_document_by_uri_sync(
