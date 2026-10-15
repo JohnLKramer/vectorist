@@ -32,15 +32,13 @@ starts at `89673ab`.
 2. Tasks 1–10 are complete and review-clean. Do not redo them.
 3. Task 11 is complete (commits `89673ab..f17705a`, reviews clean). Do not
    redo it.
-4. Tasks 12 and 13 are complete. Task 12 is commit `9173a23`. Task 13
-   is commit `e79635f`. Both reviews are clean. Do not redo them.
-   Implement Task 14, then the whole-branch review. Each task's requirements
-   are extracted with the skill script `task-brief` into
-   `.superpowers/sdd/task-N-brief.md`. Hand the implementer that file, not
-   the whole plan.
-5. After Task 14, run the whole-branch review, then
+4. Task 14 is complete (commit `31b7037`, review clean). `wiki/server.md`
+   describes the server. An API test covers a second identical ingest
+   returning `skipped`. Do not redo it.
+5. Tasks 1-14 are implemented and each task review is clean. The
+   whole-branch review is the remaining gate. After it, use
    `finishing-a-development-branch`. Delete `docs/superpowers/` on this
-   branch before any PR to `main`.
+   branch before any PR to `main`. Do not rewrite history.
 
 ## Commands
 
