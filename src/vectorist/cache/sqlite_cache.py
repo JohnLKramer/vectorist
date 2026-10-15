@@ -88,6 +88,12 @@ class SqliteCache:
     async def get_document_by_uri(self, source_uri: str) -> DocumentRecord | None:
         return await self._run(_get_document_by_uri_sync, source_uri)
 
+    async def get_document(self, document_id: str) -> DocumentRecord | None:
+        return await self._run(_get_document_sync, document_id)
+
+    async def delete_document(self, document_id: str) -> None:
+        await self._run(_delete_document_sync, document_id)
+
     async def upsert_document(self, doc: DocumentRecord) -> None:
         await self._run(_upsert_document_sync, doc)
 
@@ -122,6 +128,27 @@ def _get_document_by_uri_sync(
     if row is None:
         return None
     return _row_to_document(row)
+
+
+def _get_document_sync(
+    conn: sqlite3.Connection, document_id: str
+) -> DocumentRecord | None:
+    row = conn.execute(
+        """
+        SELECT id, source_uri, content_hash, raw_content, status, error_message
+        FROM documents
+        WHERE id = ?
+        """,
+        (document_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _row_to_document(row)
+
+
+def _delete_document_sync(conn: sqlite3.Connection, document_id: str) -> None:
+    conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    conn.commit()
 
 
 def _upsert_document_sync(conn: sqlite3.Connection, doc: DocumentRecord) -> None:

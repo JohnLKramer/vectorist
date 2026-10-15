@@ -8,3 +8,6 @@ class Settings(BaseSettings):
 
     cache_path: Path
     vec_path: Path
+    vector_backend: str = "sqlite"
+    database_url: str | None = None
+    embedder: str = "fastembed"

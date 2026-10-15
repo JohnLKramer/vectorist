@@ -124,6 +124,38 @@ async def test_save_ir_snapshot_rejects_unknown_document(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_get_document_by_id_and_delete_removes_ir_snapshot(tmp_path):
+    cache = SqliteCache(tmp_path / "cache.db")
+    await cache.initialize()
+    doc = DocumentRecord(
+        id="d1",
+        source_uri="a.md",
+        content_hash="abc",
+        raw_content="# A",
+        status=DocumentStatus.INDEXED,
+    )
+    await cache.upsert_document(doc)
+    ir = IRDocument(
+        source_uri="a.md",
+        root_id="p1",
+        nodes={"p1": _sample_paragraph()},
+    )
+    await cache.save_ir_snapshot("d1", ir)
+
+    got = await cache.get_document("d1")
+    assert got is not None
+    assert got.id == "d1"
+    assert got.source_uri == "a.md"
+    assert await cache.get_document("missing") is None
+
+    await cache.delete_document("d1")
+    assert await cache.get_document("d1") is None
+    assert await cache.get_document_by_uri("a.md") is None
+    assert await cache.get_ir_snapshot("d1") is None
+    await cache.delete_document("missing")
+
+
+@pytest.mark.asyncio
 async def test_update_status_raises_for_missing_document(tmp_path):
     cache = SqliteCache(tmp_path / "cache.db")
     await cache.initialize()
