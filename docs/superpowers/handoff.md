@@ -30,12 +30,10 @@ starts at `89673ab`.
 1. `git status` and `git log --oneline`. Trust those and the ledger over
    chat memory.
 2. Tasks 1–10 are complete and review-clean. Do not redo them.
-3. Task 11 is implemented and the filtered-search fix is committed. It has
-   not had a clean task review since the fix. Review
-   `89673ab..d903e39` before starting Task 12. The review package, once
-   generated, is `.superpowers/sdd/review-89673ab..d903e39.diff`.
-4. Then implement Tasks 12, 13, and 14 in order. Each task's requirements
-   are extracted with the skill script `task-brief` into
+3. Task 11 is complete (commits `89673ab..f17705a`, reviews clean). Do not
+   redo it.
+4. Implement Tasks 12, 13, and 14 in order. Each task's requirements are
+   extracted with the skill script `task-brief` into
    `.superpowers/sdd/task-N-brief.md`. Hand the implementer that file, not
    the whole plan.
 5. After Task 14, run the whole-branch review, then
@@ -114,10 +112,12 @@ threads. `PgVectorStore` also has no `close()`; tests that connect with
 `asyncpg` directly can warn about unclosed connections. That warning is
 known and not yet fixed.
 
-## Task 11: filtered search fixed, pool closed, re-review in progress
+## Task 11: complete
 
-Commits: `89673ab..c3044ce` (store), `c3044ce..d903e39` (filtered search),
-then `f17705a`, which adds `PgVectorStore.close()`.
+Commits `89673ab..f17705a`. Reviews:
+[first](52864611-a298-42a9-942e-2b7a338ba33c) and
+[re-review of the pool close](ef297f40-97b5-41c1-bb4e-e6b47c416108), both
+spec compliant and approved.
 
 `PgVectorStore` uses asyncpg, applies `migrations/postgres/*.sql` through
 the Liquibase changeset parser, and scores with `1 - (embedding <=> query)`
