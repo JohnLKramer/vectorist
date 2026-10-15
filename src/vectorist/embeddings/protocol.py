@@ -1,0 +1,13 @@
+from typing import Protocol
+
+
+class EmbeddingProviderProtocol(Protocol):
+    @property
+    def dimensions(self) -> int: ...
+
+    @property
+    def model_id(self) -> str: ...
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_query(self, text: str) -> list[float]: ...
