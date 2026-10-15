@@ -32,9 +32,10 @@ starts at `89673ab`.
 2. Tasks 1–10 are complete and review-clean. Do not redo them.
 3. Task 11 is complete (commits `89673ab..f17705a`, reviews clean). Do not
    redo it.
-4. Task 12 is complete (commit `9173a23`, review clean). Do not redo it.
-   Implement Tasks 13 and 14 in order. Each task's requirements are
-   extracted with the skill script `task-brief` into
+4. Tasks 12 and 13 are complete. Task 12 is commit `9173a23`. Task 13
+   is commit `e79635f`. Both reviews are clean. Do not redo them.
+   Implement Task 14, then the whole-branch review. Each task's requirements
+   are extracted with the skill script `task-brief` into
    `.superpowers/sdd/task-N-brief.md`. Hand the implementer that file, not
    the whole plan.
 5. After Task 14, run the whole-branch review, then
@@ -170,9 +171,35 @@ From the Task 10 review, still open, not blocking Tasks 12–14:
 - One sqlite-vec test constructs `FakeEmbeddingProvider` and does not use it.
 
 Prefix-filtered pgvector search is an exact scan of the matching rows.
-That is intentional. `PgVectorStore.close()` exists on the concrete class
-and is not part of `VectorStoreProtocol` yet. Task 13 should call it on
-shutdown if the app holds a Postgres pool.
+That is intentional. `PgVectorStore.close()` exists on the concrete class and is not part of
+`VectorStoreProtocol`. The API lifespan calls `close()` when the store has
+it. SQLite workers are daemon threads and have no `close()`.
+
+## Server as built after Task 13
+
+`create_app()` in `vectorist.api.app` is synchronous. A FastAPI lifespan
+initializes the cache, the vector store, and `IngestService`. Tests enter
+it with `app.router.lifespan_context`.
+
+`Settings` (`vectorist.config`) reads:
+
+- `VECTORIST_CACHE_PATH` (required)
+- `VECTORIST_VEC_PATH` (required)
+- `VECTORIST_VECTOR_BACKEND` (`sqlite` default, or `pgvector`)
+- `VECTORIST_DATABASE_URL` (required only for `pgvector`)
+- `VECTORIST_EMBEDDER` (`fastembed` default, or `fake`)
+
+An unknown backend, or `pgvector` without a database URL, raises at
+startup. Any embedder value other than `fake` constructs `FastEmbedProvider`.
+
+Routes: `POST /v1/ingest`, `POST /v1/ingest/stream` (NDJSON),
+`GET /v1/documents/{document_id}`, `DELETE /v1/documents/{document_id}`
+(204, or 404 when missing), `POST /v1/search`, `GET /v1/health`.
+Health currently always returns ok for all four fields. The pipeline-level
+skip test exists. An API-level second-ingest `skipped` test does not.
+That is Task 14.
+
+Run the server with `uv run vectorist` or `python -m vectorist` (port 8080).
 
 ## Task 12: ingestion pipeline
 
