@@ -36,16 +36,18 @@ starts at `89673ab`.
    describes the server. An API test covers a second identical ingest
    returning `skipped`. Do not redo it.
 5. Tasks 1-14 are implemented and each task review is clean. The
-   whole-branch review is in `.superpowers/sdd/branch-review.md`. Verdict:
-   with fixes. No Critical findings. Eleven Important findings are in a
-   single fix pass. One finding is not in that pass: sqlite-vec scores
-   with L2 and pgvector scores with cosine. The plan tells Task 10 to use
-   a `vec0` `float[384]` table and Task 11 to use cosine. Unifying them
-   needs a decision. Do not change the distance metric until that is
-   settled.
-6. After the fix pass and its re-review, use
-   `finishing-a-development-branch`. Delete `docs/superpowers/` on this
-   branch before any PR to `main`. Do not rewrite history.
+   whole-branch review is in `.superpowers/sdd/branch-review.md`. Its
+   Important findings are fixed in `c671b6c` and the re-review is clean.
+   One finding was left open on purpose: sqlite-vec scores with L2 and
+   pgvector scores with cosine. The plan tells Task 10 to use a `vec0`
+   `float[384]` table and Task 11 to use cosine. Do not unify them
+   without a decision.
+6. The default suite at this point is 107 passed, 4 skipped. The skipped
+   tests are pgvector and run only when `VECTORIST_PG_URL` is set.
+7. Integration is waiting on the user: merge to `main` locally, push and
+   open a PR, keep the branch, or discard. Before a PR or a merge to
+   `main`, delete `docs/superpowers/` on this branch. Do not rewrite
+   history.
 
 ## Commands
 
@@ -126,7 +128,7 @@ Commits `89673ab..f17705a`. Reviews:
 [re-review of the pool close](ef297f40-97b5-41c1-bb4e-e6b47c416108), both
 spec compliant and approved.
 
-`PgVectorStore` uses asyncpg, applies `migrations/postgres/*.sql` through
+`PgVectorStore` uses asyncpg, applies the packaged Postgres SQL through
 the Liquibase changeset parser, and scores with `1 - (embedding <=> query)`
 (cosine distance). Unfiltered search still uses the HNSW index.
 
