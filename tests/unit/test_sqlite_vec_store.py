@@ -1,6 +1,8 @@
 import math
+import sqlite3
 
 import pytest
+import sqlite_vec
 
 from vectorist.embeddings.fake import FakeEmbeddingProvider
 from vectorist.storage.models import ChunkRecord
@@ -202,3 +204,59 @@ async def test_delete_chunks_by_document_id(tmp_path):
     assert all(r.document_id != "doc-del" for r in delete_hits)
     keep_hits = await store.search(provider.embed_query(keep_text), limit=5)
     assert any(r.chunk_id == "c2" and r.document_id == "doc-keep" for r in keep_hits)
+
+
+def _table_ids(db_path, table: str, column: str) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+        rows = conn.execute(f"SELECT {column} FROM {table}").fetchall()
+        return {row[0] for row in rows}
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_chunks_by_ids_removes_vec_and_metadata(tmp_path):
+    provider = FakeEmbeddingProvider()
+    db_path = tmp_path / "vectors.db"
+    store = SqliteVecStore(db_path)
+    await store.initialize()
+
+    keep_text = "keep this chunk"
+    drop_text = "drop this chunk"
+    await store.upsert_chunks(
+        [
+            _chunk(
+                chunk_id="keep-id",
+                document_id="doc-1",
+                chunk_index=0,
+                text=keep_text,
+                source_uri="doc.md",
+                embedding=provider.embed_documents([keep_text])[0],
+                chunk_hash="keep-hash",
+            ),
+            _chunk(
+                chunk_id="drop-id",
+                document_id="doc-1",
+                chunk_index=1,
+                text=drop_text,
+                source_uri="doc.md",
+                embedding=provider.embed_documents([drop_text])[0],
+                chunk_hash="drop-hash",
+            ),
+        ]
+    )
+
+    await store.delete_chunks_by_ids([])
+    assert await store.get_chunk_hashes("doc-1") == {
+        "keep-id": "keep-hash",
+        "drop-id": "drop-hash",
+    }
+
+    await store.delete_chunks_by_ids(["drop-id"])
+    assert await store.get_chunk_hashes("doc-1") == {"keep-id": "keep-hash"}
+    assert _table_ids(db_path, "chunk_metadata", "chunk_id") == {"keep-id"}
+    assert _table_ids(db_path, "chunk_vectors", "chunk_id") == {"keep-id"}

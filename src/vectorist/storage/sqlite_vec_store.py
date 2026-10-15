@@ -78,6 +78,19 @@ def _upsert_chunks_sync(conn: sqlite3.Connection, chunks: list[ChunkRecord]) -> 
     conn.commit()
 
 
+def _delete_chunks_by_ids_sync(conn: sqlite3.Connection, chunk_ids: list[str]) -> None:
+    if not chunk_ids:
+        return
+    for chunk_id in chunk_ids:
+        conn.execute(f"DELETE FROM {_VEC_TABLE} WHERE chunk_id = ?", (chunk_id,))
+    placeholders = ", ".join("?" for _ in chunk_ids)
+    conn.execute(
+        f"DELETE FROM chunk_metadata WHERE chunk_id IN ({placeholders})",
+        tuple(chunk_ids),
+    )
+    conn.commit()
+
+
 def _delete_chunks_by_document_id_sync(conn: sqlite3.Connection, document_id: str) -> None:
     rows = conn.execute(
         "SELECT chunk_id FROM chunk_metadata WHERE document_id = ?",
@@ -235,6 +248,11 @@ class SqliteVecStore:
 
     async def delete_chunks_by_document_id(self, document_id: str) -> None:
         await self._run(_delete_chunks_by_document_id_sync, document_id)
+
+    async def delete_chunks_by_ids(self, chunk_ids: list[str]) -> None:
+        if not chunk_ids:
+            return
+        await self._run(_delete_chunks_by_ids_sync, chunk_ids)
 
     async def get_chunk_hashes(self, document_id: str) -> dict[str, str]:
         return await self._run(_get_chunk_hashes_sync, document_id)

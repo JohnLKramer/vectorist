@@ -152,6 +152,16 @@ class PgVectorStore:
                 document_id,
             )
 
+    async def delete_chunks_by_ids(self, chunk_ids: list[str]) -> None:
+        if not chunk_ids:
+            return
+        pool = self._pool_required()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM vector_chunks WHERE id = ANY($1::text[])",
+                chunk_ids,
+            )
+
     async def get_chunk_hashes(self, document_id: str) -> dict[str, str]:
         pool = self._pool_required()
         async with pool.acquire() as conn:
