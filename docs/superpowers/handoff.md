@@ -36,7 +36,14 @@ starts at `89673ab`.
    describes the server. An API test covers a second identical ingest
    returning `skipped`. Do not redo it.
 5. Tasks 1-14 are implemented and each task review is clean. The
-   whole-branch review is the remaining gate. After it, use
+   whole-branch review is in `.superpowers/sdd/branch-review.md`. Verdict:
+   with fixes. No Critical findings. Eleven Important findings are in a
+   single fix pass. One finding is not in that pass: sqlite-vec scores
+   with L2 and pgvector scores with cosine. The plan tells Task 10 to use
+   a `vec0` `float[384]` table and Task 11 to use cosine. Unifying them
+   needs a decision. Do not change the distance metric until that is
+   settled.
+6. After the fix pass and its re-review, use
    `finishing-a-development-branch`. Delete `docs/superpowers/` on this
    branch before any PR to `main`. Do not rewrite history.
 
