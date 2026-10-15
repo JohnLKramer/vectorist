@@ -179,17 +179,23 @@ class PgVectorStore:
                 )
                 if count_row is None or int(count_row["n"]) == 0:
                     return []
+                # The MATERIALIZED fence keeps the HNSW index out of this query.
+                # HNSW filters after collecting hnsw.ef_search candidates,
+                # which silently drops prefix matches outside that window.
                 rows = await conn.fetch(
                     """
-                    SELECT
-                        id,
-                        document_id,
-                        content_text,
-                        metadata,
-                        embedding <=> $1::vector AS distance
-                    FROM vector_chunks
-                    WHERE metadata->>'source_uri' LIKE $2
-                    ORDER BY embedding <=> $1::vector
+                    WITH filtered AS MATERIALIZED (
+                        SELECT
+                            id,
+                            document_id,
+                            content_text,
+                            metadata,
+                            embedding <=> $1::vector AS distance
+                        FROM vector_chunks
+                        WHERE metadata->>'source_uri' LIKE $2
+                    )
+                    SELECT * FROM filtered
+                    ORDER BY distance
                     LIMIT $3
                     """,
                     query_embedding,

@@ -143,12 +143,22 @@ def _unit_vector(*, index: int, dimensions: int = 384) -> list[float]:
     return values
 
 
-@pytest.mark.asyncio
-async def test_search_prefix_filter_keeps_match_outside_overfetch_knn_window(store):
-    provider = FakeEmbeddingProvider()
+def _near_query_vector(i: int, dimensions: int = 384) -> list[float]:
+    values = _unit_vector(index=0, dimensions=dimensions)
+    values[2 + i % (dimensions - 2)] = 0.01 * (1 + i // (dimensions - 2))
+    return values
 
+
+@pytest.mark.asyncio
+async def test_search_prefix_filter_keeps_match_outside_hnsw_candidate_window(store):
+    # Disabling sequential scans makes the planner pick the HNSW index, which
+    # only returns hnsw.ef_search (default 40) candidates before filtering.
+    index_preferring_store = PgVectorStore(
+        f"{os.environ['VECTORIST_PG_URL']}?enable_seqscan=off"
+    )
+    await index_preferring_store.initialize()
     query_vector = _unit_vector(index=0)
-    nearer_than_k = 55
+    nearer_than_ef_search = 200
     noise_chunks = [
         _chunk(
             chunk_id=f"noise-{i}",
@@ -156,9 +166,9 @@ async def test_search_prefix_filter_keeps_match_outside_overfetch_knn_window(sto
             chunk_index=0,
             text=f"noise {i}",
             source_uri=f"other/docs/noise-{i}.md",
-            embedding=query_vector,
+            embedding=_near_query_vector(i),
         )
-        for i in range(nearer_than_k)
+        for i in range(nearer_than_ef_search)
     ]
     match_chunk = _chunk(
         chunk_id="prefix-match",
@@ -170,14 +180,14 @@ async def test_search_prefix_filter_keeps_match_outside_overfetch_knn_window(sto
     )
     await store.upsert_chunks([*noise_chunks, match_chunk])
 
-    results = await store.search(
+    results = await index_preferring_store.search(
         query_vector,
         limit=1,
         filters={"source_uri_prefix": "acme/docs/"},
     )
     assert [r.chunk_id for r in results] == ["prefix-match"]
     assert results[0].source_uri == "acme/docs/target.md"
-    assert math.isclose(results[0].score, 1.0 - math.sqrt(2.0), rel_tol=1e-5)
+    assert math.isclose(results[0].score, 0.0, abs_tol=1e-6)
 
 
 @pytest.mark.asyncio
