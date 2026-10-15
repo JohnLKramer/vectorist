@@ -49,12 +49,15 @@ async def store():
         await conn.execute("TRUNCATE vector_chunks")
     finally:
         await conn.close()
-    yield pg_store
-    conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("TRUNCATE vector_chunks")
+        yield pg_store
     finally:
-        await conn.close()
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute("TRUNCATE vector_chunks")
+        finally:
+            await conn.close()
+        await pg_store.close()
 
 
 @pytest.mark.asyncio
@@ -180,14 +183,17 @@ async def test_search_prefix_filter_keeps_match_outside_hnsw_candidate_window(st
     )
     await store.upsert_chunks([*noise_chunks, match_chunk])
 
-    results = await index_preferring_store.search(
-        query_vector,
-        limit=1,
-        filters={"source_uri_prefix": "acme/docs/"},
-    )
-    assert [r.chunk_id for r in results] == ["prefix-match"]
-    assert results[0].source_uri == "acme/docs/target.md"
-    assert math.isclose(results[0].score, 0.0, abs_tol=1e-6)
+    try:
+        results = await index_preferring_store.search(
+            query_vector,
+            limit=1,
+            filters={"source_uri_prefix": "acme/docs/"},
+        )
+        assert [r.chunk_id for r in results] == ["prefix-match"]
+        assert results[0].source_uri == "acme/docs/target.md"
+        assert math.isclose(results[0].score, 0.0, abs_tol=1e-6)
+    finally:
+        await index_preferring_store.close()
 
 
 @pytest.mark.asyncio

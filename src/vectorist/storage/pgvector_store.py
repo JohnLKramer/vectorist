@@ -101,6 +101,13 @@ class PgVectorStore:
         async with self._pool.acquire() as conn:
             await _apply_postgres_migrations(conn, _POSTGRES_MIGRATIONS_DIR)
 
+    async def close(self) -> None:
+        pool = self._pool
+        if pool is None:
+            return
+        self._pool = None
+        await pool.close()
+
     def _pool_required(self) -> asyncpg.Pool:
         if self._pool is None:
             raise RuntimeError("PgVectorStore.initialize() must be called first")
