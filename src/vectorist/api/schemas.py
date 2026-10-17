@@ -25,6 +25,18 @@ class DocumentResponse(BaseModel):
     raw_content: str
 
 
+class DocumentSummaryResponse(BaseModel):
+    id: str
+    source_uri: str
+    content_hash: str
+    status: str
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentSummaryResponse]
+    next_cursor: str | None
+
+
 class SearchRequest(BaseModel):
     query: str
     limit: int = Field(10, ge=1, le=4096)
