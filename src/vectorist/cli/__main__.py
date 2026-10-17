@@ -9,9 +9,12 @@ from pathlib import Path
 import httpx
 
 from vectorist.cli.client import ServerClient
-from vectorist.cli.config import CliConfig, load_config
+from vectorist.cli.config import CliConfig, CrawlConfig, load_config, load_crawl_config
 from vectorist.cli.errors import CliError
 from vectorist.cli.repo import find_repo_root
+from vectorist.cli.crawl.command import CrawlSummary, run_crawl
+from vectorist.cli.crawl.discovery import USER_AGENT
+from vectorist.cli.crawl.render import PlaywrightRenderer, Renderer
 from vectorist.cli.sync import SyncSummary, run_sync
 
 
@@ -27,10 +30,20 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--prune", action="store_true")
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--batch-size", type=int)
+    crawl = sub.add_parser("crawl", help="crawl a documentation site and send its pages")
+    crawl.add_argument("url", nargs="?")
+    crawl.add_argument("--server")
+    crawl.add_argument("--max-pages", type=int)
+    crawl.add_argument("--delay", type=float)
+    crawl.add_argument("--concurrency", type=int)
+    crawl.add_argument("--keep-query", action="store_true")
+    crawl.add_argument("--prune", action="store_true")
+    crawl.add_argument("--dry-run", action="store_true")
+    crawl.add_argument("--batch-size", type=int)
     return parser
 
 
-def _default_client(config: CliConfig) -> ServerClient:
+def _default_client(config: CliConfig | CrawlConfig) -> ServerClient:
     return ServerClient(httpx.Client(base_url=config.server, timeout=300.0))
 
 
@@ -43,6 +56,13 @@ def _print_summary(summary: SyncSummary) -> None:
             f"ingested {summary.ingested}, unchanged {summary.unchanged}, "
             f"failed {len(summary.failures)}"
         )
+    if isinstance(summary, CrawlSummary):
+        print(
+            f"skipped by robots.txt {summary.robots_skipped}, "
+            f"redirected out of scope {summary.out_of_scope}"
+        )
+        if summary.truncated:
+            print("crawl stopped at --max-pages; some pages were not fetched")
     verb = "would prune" if summary.dry_run else "pruned"
     for uri in summary.pruned:
         print(f"{prefix}{verb} {uri}")
@@ -50,15 +70,35 @@ def _print_summary(summary: SyncSummary) -> None:
         print(f"failed: {failure}", file=sys.stderr)
 
 
+def _crawl(
+    args: argparse.Namespace,
+    client_factory: Callable[[CrawlConfig], ServerClient],
+    renderer_factory: Callable[[], Renderer] | None,
+    fetch_client: httpx.Client | None,
+) -> CrawlSummary:
+    config = load_crawl_config(args, os.environ, Path.cwd())
+    fetch = fetch_client or httpx.Client(
+        headers={"User-Agent": USER_AGENT}, timeout=30.0, follow_redirects=True
+    )
+    return run_crawl(
+        config, client_factory(config), fetch, renderer_factory or PlaywrightRenderer
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
-    client_factory: Callable[[CliConfig], ServerClient] = _default_client,
+    client_factory: Callable[..., ServerClient] = _default_client,
+    renderer_factory: Callable[[], Renderer] | None = None,
+    fetch_client: httpx.Client | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     try:
-        root = find_repo_root(args.path)
-        config = load_config(args, os.environ, root)
-        summary = run_sync(config, client_factory(config), root)
+        if args.command == "crawl":
+            summary = _crawl(args, client_factory, renderer_factory, fetch_client)
+        else:
+            root = find_repo_root(args.path)
+            config = load_config(args, os.environ, root)
+            summary = run_sync(config, client_factory(config), root)
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
