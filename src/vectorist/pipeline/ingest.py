@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from vectorist.adapters.base import AdapterProtocol
+from vectorist.adapters.html import HtmlAdapter
 from vectorist.adapters.markdown import MarkdownAdapter
 from vectorist.cache.models import DocumentRecord, DocumentStatus
 from vectorist.cache.protocol import CacheProtocol
@@ -30,12 +31,18 @@ class IngestService:
         vector_store: VectorStoreProtocol,
         embedder: EmbeddingProviderProtocol,
         adapter: AdapterProtocol | None = None,
+        adapters: dict[str, AdapterProtocol] | None = None,
         chunker: Chunker | None = None,
     ) -> None:
         self._cache = cache
         self._vector_store = vector_store
         self._embedder = embedder
-        self._adapter = MarkdownAdapter() if adapter is None else adapter
+        self._adapters: dict[str, AdapterProtocol] = {
+            "text/markdown": MarkdownAdapter() if adapter is None else adapter,
+            "text/html": HtmlAdapter(),
+        }
+        if adapters is not None:
+            self._adapters.update(adapters)
         self._chunker = Chunker(max_tokens=512) if chunker is None else chunker
 
     async def ingest_document(
@@ -44,7 +51,8 @@ class IngestService:
         content: str,
         content_type: str = "text/markdown",
     ) -> IngestResult:
-        if content_type != "text/markdown":
+        adapter = self._adapters.get(content_type)
+        if adapter is None:
             return IngestResult(
                 source_uri=source_uri,
                 document_id=None,
@@ -80,7 +88,7 @@ class IngestService:
             )
         )
         try:
-            ir_document = self._adapter.parse(source_uri, content)
+            ir_document = adapter.parse(source_uri, content)
             await self._cache.save_ir_snapshot(document_id, ir_document)
             await self._cache.update_status(document_id, DocumentStatus.PARSED)
 

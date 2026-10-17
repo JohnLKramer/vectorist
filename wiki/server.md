@@ -78,6 +78,14 @@ A successful response looks like:
 
 `status` is `indexed` when the document was parsed, chunked, and stored in the same request. Posting the same `source_uri` and the same bytes again returns `skipped` and the same `document_id`. A different body for that URI is indexed again under the same id. `failed` means the document was not indexed. `error` is then an object with `code` and `message`. Unsupported content types use `PARSE_ERROR` and a null `document_id`.
 
+### HTML content
+
+Set `content_type` to `text/html` to ingest a rendered web page. Any other type besides `text/markdown` fails with `PARSE_ERROR`.
+
+The HTML adapter indexes the main content only. It uses the first of `<main>`, `<article>` and `[role=main]` that has text. If the page has none of those, it uses `<body>` with `nav`, `header`, `footer`, `aside` and elements whose `role` is `navigation`, `banner` or `contentinfo` removed. `script`, `style`, `noscript` and `template` are always removed. A page with no text left fails with `INGEST_FAILED` rather than being indexed empty.
+
+Headings become sections and breadcrumbs. The first `h1` (else `<title>`) is the document label. `pre` becomes a code block, with the language taken from a `language-*` or `lang-*` class. Tables keep their header row, and `img` becomes a media node. `line_range` in search results is the element's line in the HTML that was posted, so it is only meaningful for the exact content ingested.
+
 `POST /v1/ingest/stream` reads a body of newline-delimited JSON objects with the same fields. Blank lines are ignored. A line that is not JSON, or that fails validation, becomes a `failed` result with `error.code` `INVALID_LINE` and does not stop the rest of the body. The response is a JSON array of the same objects as the single ingest route.
 
 ## Documents

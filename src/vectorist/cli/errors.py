@@ -12,3 +12,7 @@ class RepoError(CliError):
 
 class ServerError(CliError):
     pass
+
+
+class CrawlError(CliError):
+    pass
