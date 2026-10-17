@@ -222,3 +222,6 @@ __marimo__/
 # Local worktrees and superpowers scratch
 .worktrees/
 .superpowers/
+
+# IntelliJ files
+.idea/
