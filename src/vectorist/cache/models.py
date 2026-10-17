@@ -17,3 +17,11 @@ class DocumentRecord:
     raw_content: str
     status: DocumentStatus
     error_message: str | None = None
+
+
+@dataclass
+class DocumentSummary:
+    id: str
+    source_uri: str
+    content_hash: str
+    status: DocumentStatus

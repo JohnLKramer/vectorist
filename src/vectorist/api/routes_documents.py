@@ -1,8 +1,37 @@
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from vectorist.api.schemas import DocumentResponse
+from vectorist.api.schemas import (
+    DocumentListResponse,
+    DocumentResponse,
+    DocumentSummaryResponse,
+)
 
 router = APIRouter()
+
+
+@router.get("/v1/documents", response_model=DocumentListResponse)
+async def list_documents(
+    request: Request,
+    source_prefix: str = Query(min_length=1),
+    limit: int = Query(500, ge=1, le=1000),
+    cursor: str | None = None,
+) -> DocumentListResponse:
+    rows = await request.app.state.cache.list_documents_by_prefix(
+        source_prefix, limit + 1, cursor
+    )
+    page = rows[:limit]
+    return DocumentListResponse(
+        documents=[
+            DocumentSummaryResponse(
+                id=row.id,
+                source_uri=row.source_uri,
+                content_hash=row.content_hash,
+                status=row.status.value,
+            )
+            for row in page
+        ],
+        next_cursor=page[-1].source_uri if len(rows) > limit else None,
+    )
 
 
 @router.get("/v1/documents/{document_id}", response_model=DocumentResponse)

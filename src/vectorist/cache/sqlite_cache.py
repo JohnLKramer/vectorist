@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from vectorist.cache.models import DocumentRecord, DocumentStatus
+from vectorist.cache.models import DocumentRecord, DocumentStatus, DocumentSummary
 from vectorist.hashing import sha256_text
 from vectorist.ir.models import IRDocument
 from vectorist.ir.serialize import ir_from_json, ir_to_json
@@ -100,6 +100,11 @@ class SqliteCache:
     async def delete_document(self, document_id: str) -> None:
         await self._run(_delete_document_sync, document_id)
 
+    async def list_documents_by_prefix(
+        self, prefix: str, limit: int, after_uri: str | None = None
+    ) -> list[DocumentSummary]:
+        return await self._run(_list_documents_by_prefix_sync, prefix, limit, after_uri)
+
     async def upsert_document(self, doc: DocumentRecord) -> None:
         await self._run(_upsert_document_sync, doc)
 
@@ -159,6 +164,31 @@ def _get_document_sync(
 def _delete_document_sync(conn: sqlite3.Connection, document_id: str) -> None:
     conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
     conn.commit()
+
+
+def _list_documents_by_prefix_sync(
+    conn: sqlite3.Connection, prefix: str, limit: int, after_uri: str | None
+) -> list[DocumentSummary]:
+    rows = conn.execute(
+        """
+        SELECT id, source_uri, content_hash, status
+        FROM documents
+        WHERE substr(source_uri, 1, length(?1)) = ?1
+          AND (?2 IS NULL OR source_uri > ?2)
+        ORDER BY source_uri
+        LIMIT ?3
+        """,
+        (prefix, after_uri, limit),
+    ).fetchall()
+    return [
+        DocumentSummary(
+            id=row["id"],
+            source_uri=row["source_uri"],
+            content_hash=row["content_hash"],
+            status=DocumentStatus(row["status"]),
+        )
+        for row in rows
+    ]
 
 
 def _upsert_document_sync(conn: sqlite3.Connection, doc: DocumentRecord) -> None:

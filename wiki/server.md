@@ -82,6 +82,19 @@ A successful response looks like:
 
 ## Documents
 
+`GET /v1/documents?source_prefix=<prefix>` lists documents whose `source_uri` starts with the prefix, ordered by `source_uri`. The prefix is required and is matched literally (`%` and `_` are ordinary characters). `limit` defaults to 500 (1 to 1000); `cursor` is the `next_cursor` from the previous page.
+
+```json
+{
+  "documents": [
+    {"id": "...", "source_uri": "git:github.com/acme/widgets/a.md", "content_hash": "...", "status": "INDEXED"}
+  ],
+  "next_cursor": null
+}
+```
+
+`next_cursor` is `null` on the last page. A missing or empty prefix returns 422.
+
 `GET /v1/documents/{document_id}` returns the stored document:
 
 ```json

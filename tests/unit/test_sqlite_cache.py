@@ -217,3 +217,47 @@ async def test_ping_succeeds_while_worker_runs_and_fails_after_it_stops(tmp_path
 
     with pytest.raises(RuntimeError, match="worker thread is not running"):
         await cache.ping()
+
+
+async def _cache_with_uris(tmp_path, uris):
+    cache = SqliteCache(tmp_path / "cache.db")
+    await cache.initialize()
+    for index, uri in enumerate(uris):
+        await cache.upsert_document(
+            DocumentRecord(
+                id=f"d{index}",
+                source_uri=uri,
+                content_hash="h",
+                raw_content="x",
+                status=DocumentStatus.INDEXED,
+            )
+        )
+    return cache
+
+
+@pytest.mark.asyncio
+async def test_list_documents_by_prefix_orders_and_filters(tmp_path):
+    cache = await _cache_with_uris(tmp_path, ["b/2.md", "a/1.md", "b/1.md"])
+    got = await cache.list_documents_by_prefix("b/", 10)
+    assert [d.source_uri for d in got] == ["b/1.md", "b/2.md"]
+    assert await cache.list_documents_by_prefix("zzz", 10) == []
+
+
+@pytest.mark.asyncio
+async def test_list_documents_by_prefix_treats_wildcards_literally(tmp_path):
+    cache = await _cache_with_uris(tmp_path, ["r_x/a.md", "rax/a.md", "r%/a.md"])
+    assert [d.source_uri for d in await cache.list_documents_by_prefix("r_", 10)] == [
+        "r_x/a.md"
+    ]
+    assert [d.source_uri for d in await cache.list_documents_by_prefix("r%", 10)] == [
+        "r%/a.md"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_documents_by_prefix_pages_after_uri(tmp_path):
+    cache = await _cache_with_uris(tmp_path, ["p/1", "p/2", "p/3"])
+    first = await cache.list_documents_by_prefix("p/", 2)
+    assert [d.source_uri for d in first] == ["p/1", "p/2"]
+    rest = await cache.list_documents_by_prefix("p/", 2, after_uri="p/2")
+    assert [d.source_uri for d in rest] == ["p/3"]
