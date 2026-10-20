@@ -13,7 +13,8 @@ FastEmbed, SQLite, sqlite-vec, PostgreSQL, pgvector, pytest.
 ```text
 AGENTS.md          Agent instructions (this file). Keep on main.
 roadmap.md         High-level product roadmap. Keep on main.
-README.md          One-paragraph project summary and pointers. Keep on main.
+README.md          Project pitch, quickstart, and overview, with pointers to
+                   `wiki/` for detail. Keep on main.
 LICENSE
 wiki/              Functional and product docs. Write these after the code
                    they describe. Keep on main.
@@ -80,7 +81,9 @@ tests in `tests/unit/test_pgvector_store.py` stay optional and run only when
   after the code it describes exists.
 - Put the high-level roadmap in `roadmap.md` only. Do not duplicate it into
   README or wiki pages.
-- README stays a short summary plus pointers to `roadmap.md` and `wiki/`.
+- README is the project's front door: the pitch, a quickstart, and an overview
+  of each feature. It links to `wiki/` for detail and to `roadmap.md` for the
+  roadmap. Do not copy wiki reference tables or the phase list into it.
 - Do not add CLI, crawler, HTML/PDF adapters, auth, or async image enrichment
   during Phase 1 server work.
 - Do not commit secrets (`.env`, credentials, database files).

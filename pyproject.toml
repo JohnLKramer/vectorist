@@ -53,3 +53,10 @@ packages = ["src/vectorist"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m 'not embedder'"
+markers = [
+  "backends: runs against every vector backend; pgvector needs VECTORIST_PG_URL",
+  "live: starts a real server process",
+  "embedder: downloads and runs the real embedding model",
+  "crawl: needs Playwright and Chromium",
+]

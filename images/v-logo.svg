@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>V logo</title>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="722" x2="0" y2="302">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#111827"/>
+  <polygon points="512,722 392,602 512,602 812,302 932,302" fill="url(#g)"/>
+  <polygon points="92,302 212,302 294,384 174,384" fill="url(#g)"/>
+  <polygon points="192,402 312,402 394,484 274,484" fill="url(#g)"/>
+  <polygon points="292,502 412,502 494,584 374,584" fill="url(#g)"/>
+</svg>
