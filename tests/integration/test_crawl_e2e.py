@@ -18,10 +18,13 @@ def _chromium_available() -> bool:
         return os.path.exists(p.chromium.executable_path)
 
 
-pytestmark = pytest.mark.skipif(
-    not _chromium_available(),
-    reason="Chromium is not installed: run `playwright install chromium`",
-)
+pytestmark = [
+    pytest.mark.crawl,
+    pytest.mark.skipif(
+        not _chromium_available(),
+        reason="Chromium is not installed: run `playwright install chromium`",
+    ),
+]
 
 INDEX = """<html><body><main><h1>Docs home</h1><p>Welcome to the docs.</p>
 <a href="/docs/static.html">static</a> <a href="/docs/js.html">js</a>

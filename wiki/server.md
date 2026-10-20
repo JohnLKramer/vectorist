@@ -13,7 +13,7 @@ uv run pytest
 
 pytest, pytest-asyncio, and httpx are in the `dev` extra. Plain `uv sync` does not install them, and it removes them if they are already present.
 
-`uv run pytest` is the default suite. It uses SQLite and does not need Docker or Postgres. Postgres-backed tests, when present, stay optional.
+`uv run pytest` is the default suite. It uses SQLite and does not need Docker or Postgres. Postgres-backed tests, when present, stay optional. See [testing.md](testing.md) for the other test tiers.
 
 ## Run
 
