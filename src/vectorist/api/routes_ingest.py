@@ -15,6 +15,7 @@ def _response(result: IngestResult) -> IngestResponse:
         document_id=result.document_id,
         status=result.status,
         error=result.error,
+        pending_assets=result.pending_assets,
     )
 
 

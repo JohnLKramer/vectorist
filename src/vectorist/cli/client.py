@@ -64,3 +64,16 @@ class ServerClient:
 
     def delete_document(self, document_id: str) -> None:
         self._request("DELETE", f"/v1/documents/{document_id}")
+
+    def put_asset(
+        self, document_id: str, ref: str, data: bytes, content_type: str
+    ) -> dict[str, Any]:
+        url = f"/v1/documents/{document_id}/assets"
+        response = self._request(
+            "PUT",
+            url,
+            params={"ref": ref},
+            content=data,
+            headers={"Content-Type": content_type},
+        )
+        return self._json(response, url)

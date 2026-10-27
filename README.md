@@ -23,6 +23,7 @@ endpoint. No hosted embedding API sees your docs.
 - [Quickstart](#quickstart)
 - [Why vectorist](#why-vectorist)
 - [Get documents in](#get-documents-in)
+- [Make images searchable](#make-images-searchable)
 - [Search](#search)
 - [Storage and embeddings](#storage-and-embeddings)
 - [How it works](#how-it-works)
@@ -129,6 +130,20 @@ sites work. It stays under the start URL, follows `sitemap.xml` when there is
 one, and honors `robots.txt`. Sites that need a login aren't supported. See
 [`wiki/crawler.md`](wiki/crawler.md).
 
+### Make images searchable
+
+Set `VECTORIST_ENRICHER` and your screenshots and diagrams get a text
+description that is indexed with the chunk they sit in, so a search for what
+an image shows finds it. `ocr` reads the text in an image on your machine, and
+`claude` asks a Claude model to describe it. `sync` and `crawl` upload the
+images for you, and the same image is described once however many documents
+use it. See [`wiki/enrichment.md`](wiki/enrichment.md).
+
+```bash
+uv sync --extra cli --extra ocr
+VECTORIST_ENRICHER=ocr uv run vectorist
+```
+
 ## Search
 
 `POST /v1/search` embeds your query with the same model used at ingest and
@@ -210,10 +225,11 @@ status field of each response rather than the HTTP code.
 
 ## Roadmap
 
-The server and the ingestion clients (repo sync and the documentation-site
-crawler) work today. Image and diagram enrichment, connectors for existing
-knowledge systems, and a query surface for coding agents are not built yet.
-See [`roadmap.md`](roadmap.md) for the full sequence.
+The server, the ingestion clients (repo sync and the documentation-site
+crawler), and image enrichment work today. Enrichment covers images only;
+diagram source in fenced code is indexed as code, as before. Connectors for
+existing knowledge systems and a query surface for coding agents are not built
+yet. See [`roadmap.md`](roadmap.md) for the full sequence.
 
 ## Development
 
@@ -224,6 +240,7 @@ make test-pg          # SQLite/pgvector parity (needs Docker)
 make test-live        # real server and CLI subprocesses
 make test-embedder    # retrieval ranking with the real model
 make test-crawl       # crawler against a local server (installs Chromium)
+make test-enricher    # real OCR and Claude providers (Claude needs an API key)
 ```
 
 Plain `uv sync` removes the `dev` extra. Test tiers are described in

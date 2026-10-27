@@ -36,7 +36,8 @@ def _config(root, **overrides):
 
 
 class FakeServer:
-    def __init__(self, existing=(), statuses=None, fail=False):
+    def __init__(self, existing=(), statuses=None, fail=False, pending=None):
+        self.pending = pending or {}
         self.requests = []
         self.existing = list(existing)
         self.statuses = statuses or {}
@@ -51,13 +52,16 @@ class FakeServer:
             return httpx.Response(200, json=[
                 {"source_uri": l["source_uri"], "document_id": "x",
                  "status": self.statuses.get(l["source_uri"], "indexed"),
-                 "error": {"code": "E", "message": "bad"} if self.statuses.get(l["source_uri"]) == "failed" else None}
+                 "error": {"code": "E", "message": "bad"} if self.statuses.get(l["source_uri"]) == "failed" else None,
+                 "pending_assets": self.pending.get(l["source_uri"], [])}
                 for l in lines
             ])
         if request.url.path == "/v1/documents" and request.method == "GET":
             return httpx.Response(200, json={"documents": self.existing, "next_cursor": None})
         if request.method == "DELETE":
             return httpx.Response(204)
+        if request.method == "PUT":
+            return httpx.Response(200, json={"asset_hash": "h", "status": "queued"})
         raise AssertionError(request.url)
 
     def client(self):
@@ -120,3 +124,41 @@ def test_non_utf8_file_is_reported_not_fatal(repo):
     summary = run_sync(_config(repo), FakeServer().client(), repo)
     assert summary.ingested == 3
     assert len(summary.failures) == 1 and "bad.md" in summary.failures[0]
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
+
+
+def _puts(server):
+    return [r for r in server.requests if r.method == "PUT"]
+
+
+def test_pending_assets_are_uploaded(repo):
+    (repo / "img").mkdir()
+    (repo / "img" / "a.png").write_bytes(PNG)
+    _git(repo, "add", ".")
+    server = FakeServer(pending={"git:h/o/r/a.md": ["img/a.png", "https://x/y.png"]})
+    summary = run_sync(_config(repo), server.client(), repo)
+    puts = _puts(server)
+    assert len(puts) == 1
+    assert puts[0].url.path == "/v1/documents/x/assets"
+    assert puts[0].content == PNG
+    assert summary.assets_uploaded == 1
+    assert summary.assets_skipped == 1
+    assert summary.failures == []
+
+
+def test_dry_run_uploads_nothing(repo):
+    (repo / "img").mkdir()
+    (repo / "img" / "a.png").write_bytes(PNG)
+    server = FakeServer(pending={"git:h/o/r/a.md": ["img/a.png"]})
+    run_sync(_config(repo, dry_run=True), server.client(), repo)
+    assert _puts(server) == []
+
+
+def test_outside_ref_is_a_failure(repo):
+    server = FakeServer(pending={"git:h/o/r/a.md": ["../../../etc/passwd"]})
+    summary = run_sync(_config(repo), server.client(), repo)
+    assert _puts(server) == []
+    assert len(summary.failures) == 1
+    assert "outside" in summary.failures[0]

@@ -28,3 +28,16 @@ def test_settings_reads_backend_embedder_and_database_url(monkeypatch, tmp_path)
     assert settings.vector_backend == "pgvector"
     assert settings.database_url == "postgresql://example/vectorist"
     assert settings.embedder == "fake"
+
+
+def test_settings_enrichment_defaults(monkeypatch, tmp_path):
+    monkeypatch.setenv("VECTORIST_CACHE_PATH", str(tmp_path / "cache.db"))
+    monkeypatch.setenv("VECTORIST_VEC_PATH", str(tmp_path / "vec.db"))
+
+    settings = Settings()
+
+    assert settings.enricher == "none"
+    assert settings.claude_model == "claude-haiku-5-5"
+    assert settings.enrich_poll_seconds == 2.0
+    assert settings.enrich_max_attempts == 3
+    assert settings.max_asset_bytes == 5_000_000

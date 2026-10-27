@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: vectorist
+      POSTGRES_PASSWORD: vectorist
+      POSTGRES_DB: vectorist
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vectorist -d vectorist"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

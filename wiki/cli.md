@@ -21,6 +21,26 @@ matches the path relative to the repository root, and `*` also matches `/`.
 
 A file that is not valid UTF-8 is reported as failed; the other files still sync.
 
+## Images
+
+When the server has image enrichment on (see [enrichment.md](enrichment.md)), each ingest result lists the images the server wants. `sync` reads each one and uploads it to the server. It does this for new and for unchanged documents, so a second run sends images the first run missed.
+
+How a reference in a Markdown file is handled:
+
+- A relative path is read from the file's own directory. A path that starts with `/` is read from the repository root.
+- A `data:` URI with base64 data is decoded and uploaded.
+- An `http` or `https` reference is not downloaded. It is counted as skipped.
+- A path that leaves the repository root, an unreadable file, a malformed `data:` URI, or any other scheme is a failure for that image.
+- A file must be a PNG, JPEG, GIF, or WebP image of at most 5,000,000 bytes. The CLI checks the file's first bytes, not its name.
+
+An image that fails is reported with its document and reference, and the run exits 1 like any other failure. The documents still sync.
+
+The run prints a second line when it handled any images:
+
+```text
+assets uploaded 3, skipped 1
+```
+
 ## Flags
 
 | Flag | Meaning |

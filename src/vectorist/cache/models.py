@@ -25,3 +25,11 @@ class DocumentSummary:
     source_uri: str
     content_hash: str
     status: DocumentStatus
+
+
+@dataclass
+class AssetRecord:
+    hash: str
+    content_type: str
+    size: int
+    data: bytes

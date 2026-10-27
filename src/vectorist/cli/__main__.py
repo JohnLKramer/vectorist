@@ -56,6 +56,11 @@ def _print_summary(summary: SyncSummary) -> None:
             f"ingested {summary.ingested}, unchanged {summary.unchanged}, "
             f"failed {len(summary.failures)}"
         )
+    if summary.assets_uploaded or summary.assets_skipped:
+        print(
+            f"assets uploaded {summary.assets_uploaded}, "
+            f"skipped {summary.assets_skipped}"
+        )
     if isinstance(summary, CrawlSummary):
         print(
             f"skipped by robots.txt {summary.robots_skipped}, "

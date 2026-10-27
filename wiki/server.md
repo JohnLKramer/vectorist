@@ -34,8 +34,17 @@ Set the environment variables below before starting. Required paths have no defa
 | `VECTORIST_VECTOR_BACKEND` | no | `sqlite` | `sqlite` or `pgvector` |
 | `VECTORIST_DATABASE_URL` | for `pgvector` | | Postgres URL. Startup fails if the backend is `pgvector` and this is unset |
 | `VECTORIST_EMBEDDER` | no | `fastembed` | `fastembed` or `fake` |
+| `VECTORIST_ENRICHER` | no | `none` | Image description provider: `none`, `fake`, `ocr`, or `claude`. See [enrichment.md](enrichment.md) |
+| `VECTORIST_CLAUDE_MODEL` | no | `claude-haiku-5-5` | Model used when the enricher is `claude` |
+| `VECTORIST_ENRICH_POLL_SECONDS` | no | `2.0` | Seconds the enrichment worker waits when the job queue is empty, and before it retries a failed attempt |
+| `VECTORIST_ENRICH_MAX_ATTEMPTS` | no | `3` | Failed attempts before an image job is marked `FAILED` |
+| `VECTORIST_MAX_ASSET_BYTES` | no | `5000000` | Largest image the upload route accepts |
+
+The `sync` and `crawl` commands have their own upload limit of 5,000,000 bytes per image. That limit is fixed and does not follow `VECTORIST_MAX_ASSET_BYTES`.
 
 `sqlite` is the default vector store. `pgvector` uses `VECTORIST_DATABASE_URL`. Any other backend name fails startup. Any embedder other than `fastembed` or `fake` also fails startup. The match is case-sensitive.
+
+The enricher is checked at startup too. An unknown name fails startup, as does `claude` without `ANTHROPIC_API_KEY` or the `claude` extra, and `ocr` without the `ocr` extra. With the default `none`, no worker starts and ingest behaves as it did before.
 
 Both stores apply their schema migrations at startup. The SQL ships inside the package under `vectorist/migrations/sql/`, so an installed copy finds it the same way a source checkout does. Startup fails if that directory has no migration files.
 
@@ -87,6 +96,10 @@ The HTML adapter indexes the main content only. It uses the first of `<main>`, `
 Headings become sections and breadcrumbs. The first `h1` (else `<title>`) is the document label. `pre` becomes a code block, with the language taken from a `language-*` or `lang-*` class. Tables keep their header row, and `img` becomes a media node. `line_range` in search results is the element's line in the HTML that was posted, so it is only meaningful for the exact content ingested.
 
 `POST /v1/ingest/stream` reads a body of newline-delimited JSON objects with the same fields. Blank lines are ignored. A line that is not JSON, or that fails validation, becomes a `failed` result with `error.code` `INVALID_LINE` and does not stop the rest of the body. The response is a JSON array of the same objects as the single ingest route.
+
+### Images
+
+When the enricher is not `none`, each ingest response also has `pending_assets`, a list of the image `src` values that still need an upload. `PUT /v1/documents/{document_id}/assets?ref=<src>` takes the image and `GET /v1/enrichment` reports job counts. Both are described in [enrichment.md](enrichment.md).
 
 ## Documents
 

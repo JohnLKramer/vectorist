@@ -14,6 +14,7 @@ class IngestResponse(BaseModel):
     document_id: str | None
     status: str
     error: dict[str, str] | None = None
+    pending_assets: list[str] = Field(default_factory=list)
 
 
 class DocumentResponse(BaseModel):
@@ -62,3 +63,15 @@ class HealthResponse(BaseModel):
     cache: str
     vector_store: str
     embedder: str
+
+
+class AssetResponse(BaseModel):
+    asset_hash: str
+    status: Literal["queued", "done"]
+
+
+class EnrichmentCountsResponse(BaseModel):
+    pending: int
+    running: int
+    done: int
+    failed: int

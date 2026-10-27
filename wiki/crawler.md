@@ -29,6 +29,17 @@ there is no usable sitemap, the crawler follows links found in the rendered
 pages, breadth first from the start URL. `robots.txt` is honoured for the
 `vectorist` user agent; disallowed pages are skipped and counted.
 
+## Images
+
+When the server has image enrichment on (see [enrichment.md](enrichment.md)), the crawler downloads the images the server asks for and uploads them. It downloads them with the same HTTP client it uses for `robots.txt` and sitemaps, not with the browser, so an image that needs a logged-in browser session or a script to load is not fetched.
+
+- Images may be on any host. They are not limited to the crawl scope, and `robots.txt` is not applied to them.
+- A relative reference is resolved against the page URL. A `data:` URI is decoded.
+- A download under 2 KB is skipped and counted. This drops tracking pixels and small decorations that the page markup did not mark.
+- A failed download, an unsupported file type, or an image over 5,000,000 bytes is reported as a failure for that page. The page itself still syncs.
+
+The summary adds `assets uploaded N, skipped N` when any images were handled.
+
 ## Flags
 
 | Flag | Meaning |

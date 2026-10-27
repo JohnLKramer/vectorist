@@ -13,6 +13,13 @@ class NodeType(str, Enum):
     LIST = "LIST"
 
 
+class EnrichmentStatus(str, Enum):
+    PENDING = "PENDING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
 class IRNodeBase(BaseModel):
     node_id: str
     node_type: NodeType
@@ -59,7 +66,7 @@ class MediaNode(IRNodeBase):
     alt_text: str = ""
     caption: str = ""
     asset_uri_or_hash: str = ""
-    enrichment_status: str = "PENDING"
+    enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
 
 
 IRNode = Annotated[

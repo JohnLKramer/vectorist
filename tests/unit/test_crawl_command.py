@@ -34,17 +34,23 @@ def _pages(spec):
 
 
 class FakeServer:
-    def __init__(self, existing=()):
+    def __init__(self, existing=(), pending=None):
         self.requests = []
         self.existing = list(existing)
+        self.pending = pending or {}
+        self.assets = []
 
     def __call__(self, request):
         self.requests.append(request)
         if request.url.path == "/v1/ingest/stream":
             lines = [json.loads(l) for l in request.content.decode().splitlines()]
             return httpx.Response(200, json=[
-                {"source_uri": l["source_uri"], "document_id": "x", "status": "indexed", "error": None}
+                {"source_uri": l["source_uri"], "document_id": "x", "status": "indexed", "error": None,
+                 "pending_assets": self.pending.get(l["source_uri"], [])}
                 for l in lines])
+        if request.method == "PUT" and "/assets" in request.url.path:
+            self.assets.append(request)
+            return httpx.Response(200, json={"status": "pending"})
         if request.method == "GET":
             return httpx.Response(200, json={"documents": self.existing, "next_cursor": None})
         return httpx.Response(204)
@@ -158,3 +164,45 @@ def test_config_unknown_crawl_key_is_fatal(tmp_path):
                 keep_query=False, prune=False, dry_run=False, batch_size=None)
     with pytest.raises(ConfigError, match="max_page"):
         load_crawl_config(Namespace(**base), {}, tmp_path)
+
+
+def _png_fetch(log, fail=()):
+    def handler(request):
+        if not request.url.path.endswith(".png"):
+            return httpx.Response(404)
+        log.append(str(request.url))
+        if request.url.path in fail:
+            return httpx.Response(404)
+        return httpx.Response(200, content=b"\x89PNG\r\n\x1a\n" + b"0" * 3000)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_pending_assets_are_downloaded_against_the_final_url_and_uploaded():
+    pages = _pages({START: (200, [])})
+    server = FakeServer(pending={START: ["img/a.png"]})
+    log = []
+    summary = run_crawl(_config(), server.client(), _png_fetch(log), lambda: FakeRenderer(pages))
+    assert log == ["https://h.example/img/a.png"]
+    assert len(server.assets) == 1
+    assert summary.assets_uploaded == 1 and summary.failures == []
+
+
+def test_dry_run_downloads_nothing():
+    pages = _pages({START: (200, [])})
+    server = FakeServer(pending={START: ["img/a.png"]})
+    log = []
+    run_crawl(_config(dry_run=True), server.client(), _png_fetch(log), lambda: FakeRenderer(pages))
+    assert log == [] and server.assets == []
+
+
+def test_failed_download_adds_failure_and_run_continues():
+    pages = _pages({START: (200, ["/docs/b"]), f"{START}/b": (200, [])})
+    server = FakeServer(pending={START: ["/bad.png"], f"{START}/b": ["/good.png"]})
+    log = []
+    summary = run_crawl(
+        _config(), server.client(), _png_fetch(log, fail=("/bad.png",)), lambda: FakeRenderer(pages)
+    )
+    assert summary.ingested == 2
+    assert summary.assets_uploaded == 1
+    assert len(summary.failures) == 1 and "404" in summary.failures[0]

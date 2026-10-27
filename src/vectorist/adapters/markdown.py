@@ -9,6 +9,7 @@ from markdown_it.token import Token
 from vectorist.adapters.language import detect_code_language
 from vectorist.ir.models import (
     CodeBlockNode,
+    EnrichmentStatus,
     IRDocument,
     IRNode,
     MediaNode,
@@ -234,7 +235,20 @@ class _IRBuilder:
         self._add_child(parent_id, node_id)
         return i
 
-    def _add_media(self, src: str, alt_text: str, line_range: tuple[int, int]) -> None:
+    def _add_media(
+        self,
+        src: str,
+        alt_text: str,
+        line_range: tuple[int, int],
+        skip_reason: str | None = None,
+    ) -> None:
+        if not src:
+            skip_reason = "no-src"
+        metadata: dict[str, str] = {"ref": src}
+        status = EnrichmentStatus.PENDING
+        if skip_reason is not None:
+            status = EnrichmentStatus.SKIPPED
+            metadata["skip_reason"] = skip_reason
         parent_id = self._attach_top_level_block(self._current_parent_id())
         node_id = self._next_id()
         node = MediaNode(
@@ -245,12 +259,12 @@ class _IRBuilder:
             breadcrumbs=self._breadcrumbs(),
             line_range=line_range,
             raw_content=alt_text or src,
-            metadata={},
+            metadata=metadata,
             media_type="image",
             alt_text=alt_text,
             caption="",
             asset_uri_or_hash=src,
-            enrichment_status="PENDING",
+            enrichment_status=status,
         )
         self._nodes[node_id] = node
         self._add_child(parent_id, node_id)
