@@ -50,6 +50,9 @@ by default, `pgvector` supported) → `/v1/search`.
 - `api/app.py` wires the backends from `config.py` settings and fails startup
   on an unknown vector backend or embedder.
 - Only changed chunk hashes are re-embedded; removed chunks are deleted.
+- Image enrichment: the adapters mark images, clients upload them to
+  `/v1/documents/{id}/assets`, and a worker in `enrichment/` describes them and
+  re-indexes the linked documents.
 - The SQLite cache and sqlite-vec store each run all queries on one worker
   thread. A failed job rolls back before the error reaches the caller.
 - Embedding runs in `asyncio.to_thread`; the provider protocol is synchronous.
@@ -84,6 +87,6 @@ tests in `tests/unit/test_pgvector_store.py` stay optional and run only when
 - README is the project's front door: the pitch, a quickstart, and an overview
   of each feature. It links to `wiki/` for detail and to `roadmap.md` for the
   roadmap. Do not copy wiki reference tables or the phase list into it.
-- Do not add CLI, crawler, HTML/PDF adapters, auth, or async image enrichment
-  during Phase 1 server work.
+- Do not add CLI, crawler, HTML/PDF adapters, or auth during Phase 1 server
+  work.
 - Do not commit secrets (`.env`, credentials, database files).

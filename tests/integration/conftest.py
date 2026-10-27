@@ -17,3 +17,9 @@ def live_server(backend, tmp_path):
         server.stop()
         if dsn:
             live.truncate_vector_chunks(dsn)
+
+
+@pytest.fixture
+def enrich_env(monkeypatch):
+    monkeypatch.setenv("VECTORIST_ENRICHER", "fake")
+    monkeypatch.setenv("VECTORIST_ENRICH_POLL_SECONDS", "0.05")

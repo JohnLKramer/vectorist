@@ -1,6 +1,6 @@
 PG_URL := postgresql://vectorist:vectorist@localhost:55432/vectorist
 
-.PHONY: test test-pg test-live test-embedder test-crawl
+.PHONY: test test-pg test-live test-embedder test-crawl test-enricher
 
 test:
 	uv run pytest
@@ -19,3 +19,6 @@ test-embedder:
 test-crawl:
 	uv run playwright install chromium
 	uv run pytest -m crawl
+
+test-enricher:
+	uv run pytest -m enricher -o addopts=""

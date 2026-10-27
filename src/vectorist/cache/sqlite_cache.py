@@ -6,8 +6,13 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from vectorist.cache.models import DocumentRecord, DocumentStatus, DocumentSummary
-from vectorist.hashing import sha256_text
+from vectorist.cache.models import (
+    AssetRecord,
+    DocumentRecord,
+    DocumentStatus,
+    DocumentSummary,
+)
+from vectorist.hashing import sha256_bytes, sha256_text
 from vectorist.ir.models import IRDocument
 from vectorist.ir.serialize import ir_from_json, ir_to_json
 from vectorist.migrations.runner import apply_migrations, packaged_migrations_dir
@@ -124,6 +129,52 @@ class SqliteCache:
             _update_status_sync, document_id, status, error_message
         )
 
+    async def put_asset(self, data: bytes, content_type: str) -> str:
+        return await self._run(_put_asset_sync, data, content_type)
+
+    async def get_asset(self, asset_hash: str) -> AssetRecord | None:
+        return await self._run(_get_asset_sync, asset_hash)
+
+    async def link_asset(self, document_id: str, ref: str, asset_hash: str) -> None:
+        await self._run(_link_asset_sync, document_id, ref, asset_hash)
+
+    async def get_document_assets(self, document_id: str) -> dict[str, str]:
+        return await self._run(_get_document_assets_sync, document_id)
+
+    async def document_ids_for_asset(self, asset_hash: str) -> list[str]:
+        return await self._run(_document_ids_for_asset_sync, asset_hash)
+
+    async def put_enrichment(
+        self, asset_hash: str, provider_id: str, text: str
+    ) -> None:
+        await self._run(_put_enrichment_sync, asset_hash, provider_id, text)
+
+    async def get_enrichments(
+        self, asset_hashes: list[str], provider_id: str
+    ) -> dict[str, str]:
+        return await self._run(_get_enrichments_sync, asset_hashes, provider_id)
+
+    async def enqueue_job(self, asset_hash: str) -> None:
+        await self._run(_enqueue_job_sync, asset_hash)
+
+    async def get_job_statuses(self, asset_hashes: list[str]) -> dict[str, str]:
+        return await self._run(_get_job_statuses_sync, asset_hashes)
+
+    async def claim_job(self) -> str | None:
+        return await self._run(_claim_job_sync)
+
+    async def complete_job(self, asset_hash: str) -> None:
+        await self._run(_complete_job_sync, asset_hash)
+
+    async def fail_job(self, asset_hash: str, error: str, max_attempts: int) -> str:
+        return await self._run(_fail_job_sync, asset_hash, error, max_attempts)
+
+    async def requeue_running_jobs(self) -> int:
+        return await self._run(_requeue_running_jobs_sync)
+
+    async def job_counts(self) -> dict[str, int]:
+        return await self._run(_job_counts_sync)
+
 
 def _ping_sync(conn: sqlite3.Connection) -> None:
     conn.execute("SELECT 1 FROM documents LIMIT 1").fetchone()
@@ -162,7 +213,26 @@ def _get_document_sync(
 
 
 def _delete_document_sync(conn: sqlite3.Connection, document_id: str) -> None:
+    # Collect only this document's assets: an asset another caller has stored but
+    # not linked yet must survive a concurrent delete of an unrelated document.
+    own_hashes = [
+        row["asset_hash"]
+        for row in conn.execute(
+            "SELECT DISTINCT asset_hash FROM document_assets WHERE document_id = ?",
+            (document_id,),
+        ).fetchall()
+    ]
     conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    for asset_hash in own_hashes:
+        still_linked = conn.execute(
+            "SELECT 1 FROM document_assets WHERE asset_hash = ? LIMIT 1",
+            (asset_hash,),
+        ).fetchone()
+        if still_linked is not None:
+            continue
+        conn.execute("DELETE FROM enrichments WHERE asset_hash = ?", (asset_hash,))
+        conn.execute("DELETE FROM enrichment_jobs WHERE asset_hash = ?", (asset_hash,))
+        conn.execute("DELETE FROM assets WHERE hash = ?", (asset_hash,))
     conn.commit()
 
 
@@ -279,3 +349,219 @@ def _row_to_document(row: sqlite3.Row) -> DocumentRecord:
         status=DocumentStatus(row["status"]),
         error_message=row["error_message"],
     )
+
+
+def _put_asset_sync(
+    conn: sqlite3.Connection, data: bytes, content_type: str
+) -> str:
+    asset_hash = sha256_bytes(data)
+    conn.execute(
+        """
+        INSERT INTO assets (hash, content_type, size, data)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(hash) DO NOTHING
+        """,
+        (asset_hash, content_type, len(data), data),
+    )
+    conn.commit()
+    return asset_hash
+
+
+def _get_asset_sync(conn: sqlite3.Connection, asset_hash: str) -> AssetRecord | None:
+    row = conn.execute(
+        "SELECT hash, content_type, size, data FROM assets WHERE hash = ?",
+        (asset_hash,),
+    ).fetchone()
+    if row is None:
+        return None
+    return AssetRecord(
+        hash=row["hash"],
+        content_type=row["content_type"],
+        size=row["size"],
+        data=bytes(row["data"]),
+    )
+
+
+def _link_asset_sync(
+    conn: sqlite3.Connection, document_id: str, ref: str, asset_hash: str
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO document_assets (document_id, ref, asset_hash)
+        VALUES (?, ?, ?)
+        ON CONFLICT(document_id, ref) DO UPDATE SET asset_hash = excluded.asset_hash
+        """,
+        (document_id, ref, asset_hash),
+    )
+    conn.commit()
+
+
+def _get_document_assets_sync(
+    conn: sqlite3.Connection, document_id: str
+) -> dict[str, str]:
+    rows = conn.execute(
+        "SELECT ref, asset_hash FROM document_assets WHERE document_id = ?",
+        (document_id,),
+    ).fetchall()
+    return {row["ref"]: row["asset_hash"] for row in rows}
+
+
+def _document_ids_for_asset_sync(
+    conn: sqlite3.Connection, asset_hash: str
+) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT document_id FROM document_assets
+        WHERE asset_hash = ?
+        ORDER BY document_id
+        """,
+        (asset_hash,),
+    ).fetchall()
+    return [row["document_id"] for row in rows]
+
+
+def _put_enrichment_sync(
+    conn: sqlite3.Connection, asset_hash: str, provider_id: str, text: str
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO enrichments (asset_hash, provider_id, text)
+        VALUES (?, ?, ?)
+        ON CONFLICT(asset_hash, provider_id) DO UPDATE SET text = excluded.text
+        """,
+        (asset_hash, provider_id, text),
+    )
+    conn.commit()
+
+
+def _placeholders(count: int) -> str:
+    return ", ".join("?" * count)
+
+
+def _get_enrichments_sync(
+    conn: sqlite3.Connection, asset_hashes: list[str], provider_id: str
+) -> dict[str, str]:
+    if not asset_hashes:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT asset_hash, text FROM enrichments
+        WHERE provider_id = ? AND asset_hash IN ({_placeholders(len(asset_hashes))})
+        """,
+        (provider_id, *asset_hashes),
+    ).fetchall()
+    return {row["asset_hash"]: row["text"] for row in rows}
+
+
+def _enqueue_job_sync(conn: sqlite3.Connection, asset_hash: str) -> None:
+    # A DONE job is reset too: the upload route enqueues only when the current
+    # provider has no description, so DONE here means another provider did it.
+    conn.execute(
+        """
+        INSERT INTO enrichment_jobs (asset_hash, status, attempts)
+        VALUES (?, 'PENDING', 0)
+        ON CONFLICT(asset_hash) DO UPDATE SET
+            status = 'PENDING',
+            attempts = 0,
+            error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE enrichment_jobs.status IN ('FAILED', 'DONE')
+        """,
+        (asset_hash,),
+    )
+    conn.commit()
+
+
+def _get_job_statuses_sync(
+    conn: sqlite3.Connection, asset_hashes: list[str]
+) -> dict[str, str]:
+    if not asset_hashes:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT asset_hash, status FROM enrichment_jobs
+        WHERE asset_hash IN ({_placeholders(len(asset_hashes))})
+        """,
+        asset_hashes,
+    ).fetchall()
+    return {row["asset_hash"]: row["status"] for row in rows}
+
+
+def _claim_job_sync(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        """
+        SELECT asset_hash FROM enrichment_jobs
+        WHERE status = 'PENDING'
+        ORDER BY rowid
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute(
+        """
+        UPDATE enrichment_jobs
+        SET status = 'RUNNING', updated_at = CURRENT_TIMESTAMP
+        WHERE asset_hash = ?
+        """,
+        (row["asset_hash"],),
+    )
+    conn.commit()
+    return row["asset_hash"]
+
+
+def _complete_job_sync(conn: sqlite3.Connection, asset_hash: str) -> None:
+    conn.execute(
+        """
+        UPDATE enrichment_jobs
+        SET status = 'DONE', error = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE asset_hash = ?
+        """,
+        (asset_hash,),
+    )
+    conn.commit()
+
+
+def _fail_job_sync(
+    conn: sqlite3.Connection, asset_hash: str, error: str, max_attempts: int
+) -> str:
+    row = conn.execute(
+        "SELECT attempts FROM enrichment_jobs WHERE asset_hash = ?",
+        (asset_hash,),
+    ).fetchone()
+    if row is None:
+        return "FAILED"
+    attempts = row["attempts"] + 1
+    status = "PENDING" if attempts < max_attempts else "FAILED"
+    conn.execute(
+        """
+        UPDATE enrichment_jobs
+        SET status = ?, attempts = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE asset_hash = ?
+        """,
+        (status, attempts, error, asset_hash),
+    )
+    conn.commit()
+    return status
+
+
+def _requeue_running_jobs_sync(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute(
+        """
+        UPDATE enrichment_jobs
+        SET status = 'PENDING', updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'RUNNING'
+        """
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def _job_counts_sync(conn: sqlite3.Connection) -> dict[str, int]:
+    counts = {"PENDING": 0, "RUNNING": 0, "DONE": 0, "FAILED": 0}
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM enrichment_jobs GROUP BY status"
+    ).fetchall()
+    for row in rows:
+        counts[row["status"]] = row["n"]
+    return counts

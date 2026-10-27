@@ -1,8 +1,11 @@
 import subprocess
 import sys
+import time
 
 import httpx
 import pytest
+
+import live
 
 pytestmark = pytest.mark.live
 
@@ -75,3 +78,34 @@ def test_console_script_resolves():
     script = __import__("pathlib").Path(sys.executable).parent / "vectorist-cli"
     result = subprocess.run([str(script), "--help"], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+def test_cli_sync_uploads_images_over_socket(tmp_path):
+    env = live.server_env("sqlite", tmp_path)
+    env["VECTORIST_ENRICHER"] = "fake"
+    env["VECTORIST_ENRICH_POLL_SECONDS"] = "0.05"
+    server = live.LiveServer(env)
+    repo = tmp_path / "repo"
+    (repo / "docs" / "img").mkdir(parents=True)
+    _git(repo, "init", "-q")
+    (repo / "docs" / "a.md").write_text("# A\n\npooling text\n\n![d](img/a.png)\n")
+    (repo / "docs" / "img" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    _git(repo, "add", ".")
+    try:
+        server.start()
+        result = _sync(server, repo)
+        assert result.returncode == 0, result.stderr
+        deadline = time.monotonic() + 15
+        while True:
+            counts = httpx.get(f"{server.base_url}/v1/enrichment").json()
+            if counts["pending"] == 0 and counts["running"] == 0:
+                break
+            assert time.monotonic() < deadline, counts
+            time.sleep(0.1)
+        search = httpx.post(
+            f"{server.base_url}/v1/search",
+            json={"query": "fake description of image", "limit": 10},
+        ).json()
+        assert any("fake description of image" in h["content_text"] for h in search["results"])
+    finally:
+        server.stop()

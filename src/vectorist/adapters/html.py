@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from vectorist.adapters.image_filter import image_skip_reason
 from vectorist.adapters.language import detect_code_language
 from vectorist.adapters.markdown import _IRBuilder
 from vectorist.ir.models import CodeBlockNode, IRDocument, TableNode
@@ -157,7 +158,7 @@ class _HtmlIRBuilder(_IRBuilder):
         src = tag.get("src") or ""
         alt = tag.get("alt") or ""
         start = _start_line(tag)
-        self._add_media(str(src), str(alt), (start, start))
+        self._add_media(str(src), str(alt), (start, start), image_skip_reason(tag))
 
 
 class HtmlAdapter:

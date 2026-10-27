@@ -1,6 +1,11 @@
 from typing import Protocol
 
-from vectorist.cache.models import DocumentRecord, DocumentStatus, DocumentSummary
+from vectorist.cache.models import (
+    AssetRecord,
+    DocumentRecord,
+    DocumentStatus,
+    DocumentSummary,
+)
 from vectorist.ir.models import IRDocument
 
 
@@ -29,3 +34,37 @@ class CacheProtocol(Protocol):
         status: DocumentStatus,
         error_message: str | None = None,
     ) -> None: ...
+
+    async def put_asset(self, data: bytes, content_type: str) -> str: ...
+
+    async def get_asset(self, asset_hash: str) -> AssetRecord | None: ...
+
+    async def link_asset(self, document_id: str, ref: str, asset_hash: str) -> None: ...
+
+    async def get_document_assets(self, document_id: str) -> dict[str, str]: ...
+
+    async def document_ids_for_asset(self, asset_hash: str) -> list[str]: ...
+
+    async def put_enrichment(
+        self, asset_hash: str, provider_id: str, text: str
+    ) -> None: ...
+
+    async def get_enrichments(
+        self, asset_hashes: list[str], provider_id: str
+    ) -> dict[str, str]: ...
+
+    async def enqueue_job(self, asset_hash: str) -> None: ...
+
+    async def get_job_statuses(self, asset_hashes: list[str]) -> dict[str, str]: ...
+
+    async def claim_job(self) -> str | None: ...
+
+    async def complete_job(self, asset_hash: str) -> None: ...
+
+    async def fail_job(
+        self, asset_hash: str, error: str, max_attempts: int
+    ) -> str: ...
+
+    async def requeue_running_jobs(self) -> int: ...
+
+    async def job_counts(self) -> dict[str, int]: ...

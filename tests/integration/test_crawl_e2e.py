@@ -6,6 +6,7 @@ import threading
 
 import httpx
 import pytest
+from enrich_helpers import wait_for_enrichment
 
 from vectorist.api.app import create_app
 from vectorist.cli.__main__ import main
@@ -84,5 +85,56 @@ async def test_crawl_renders_javascript_and_prunes(tmp_path, monkeypatch, cli_cl
                 docs = (await aclient.get(f"/v1/documents?source_prefix={base}/docs")).json()
                 assert sorted(d["source_uri"].rsplit("/", 1)[-1] for d in docs["documents"]) == [
                     "index.html", "js.html", "static.html"]
+    finally:
+        server.shutdown()
+
+
+IMAGE_PAGE = """<html><body><main><h1>Images</h1><p>Architecture overview.</p>
+<img src="/docs/content.png" alt="Architecture">
+<img src="/docs/small.png" alt="Dot">
+<img src="/docs/logo.png" alt="Logo" class="logo"></main></body></html>"""
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+async def test_crawl_uploads_content_images_only(tmp_path, monkeypatch, cli_client_factory, enrich_env):
+    monkeypatch.setenv("VECTORIST_CACHE_PATH", str(tmp_path / "cache.db"))
+    monkeypatch.setenv("VECTORIST_VEC_PATH", str(tmp_path / "vec.db"))
+    monkeypatch.setenv("VECTORIST_EMBEDDER", "fake")
+    for name in ("VECTORIST_VECTOR_BACKEND", "VECTORIST_DATABASE_URL", "VECTORIST_PG_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    site = tmp_path / "site"
+    (site / "docs").mkdir(parents=True)
+    (site / "docs" / "index.html").write_text(IMAGE_PAGE)
+    (site / "docs" / "content.png").write_bytes(PNG_SIGNATURE + b"0" * 4000)
+    (site / "docs" / "small.png").write_bytes(PNG_SIGNATURE + b"0" * 92)
+    (site / "docs" / "logo.png").write_bytes(PNG_SIGNATURE + b"0" * 4000)
+    requested: list[str] = []  # the crawler's downloads only: Chromium sends a Referer for subresources
+
+    class _Recording(_Quiet):
+        def do_GET(self):
+            if self.headers.get("Referer") is None:
+                requested.append(self.path)
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(_Recording, directory=str(site))
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+
+    app = create_app()
+    try:
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://t") as aclient:
+                factory = cli_client_factory(aclient)
+                argv = ["crawl", f"{base}/docs/index.html", "--delay", "0"]
+                assert await asyncio.to_thread(main, argv, factory) == 0
+                await wait_for_enrichment(aclient)
+                assert (await aclient.get("/v1/enrichment")).json()["done"] == 1
+                assert "/docs/content.png" in requested
+                assert "/docs/small.png" in requested
+                assert "/docs/logo.png" not in requested
     finally:
         server.shutdown()

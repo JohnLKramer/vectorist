@@ -225,3 +225,21 @@ def test_indented_code_and_html_blocks_survive_into_ir():
     assert len(html_nodes) == 1
     assert html_nodes[0].raw_content.startswith('<div class="note">')
     assert_all_nodes_reachable(doc)
+
+
+def _media(doc):
+    return [n for n in doc.nodes.values() if n.node_type == NodeType.MEDIA]
+
+
+def test_empty_src_image_is_skipped():
+    doc = MarkdownAdapter().parse("doc.md", "![alt]()\n")
+    (media,) = _media(doc)
+    assert media.enrichment_status == "SKIPPED"
+    assert media.metadata == {"ref": "", "skip_reason": "no-src"}
+
+
+def test_image_records_ref():
+    doc = MarkdownAdapter().parse("doc.md", "![d](img/a.png)\n")
+    (media,) = _media(doc)
+    assert media.metadata["ref"] == "img/a.png"
+    assert media.enrichment_status == "PENDING"

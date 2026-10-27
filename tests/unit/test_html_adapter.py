@@ -60,3 +60,15 @@ def test_empty_page_fails():
 def test_malformed_html_parses():
     doc = _parse("<main><h1>Open<p>Unclosed paragraph<p>Another")
     assert any("Another" in n.raw_content for n in doc.nodes.values())
+
+
+def test_noisy_image_is_skipped_and_diagram_is_pending(fixtures_dir):
+    html = (fixtures_dir / "html" / "guide.html").read_text().replace(
+        '<img src="/diagram.png" alt="Pool diagram">',
+        '<img src="/diagram.png" alt="Pool diagram">\n<img src="/px.png" alt="x" width="1" height="1">',
+    )
+    doc = _parse(html)
+    media = {n.metadata["ref"]: n for n in _nodes(doc, NodeType.MEDIA)}
+    assert media["/diagram.png"].enrichment_status == "PENDING"
+    assert media["/px.png"].enrichment_status == "SKIPPED"
+    assert media["/px.png"].metadata["skip_reason"] == "too-small"

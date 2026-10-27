@@ -21,10 +21,11 @@ def _env(tmp_path, **overrides):
     [
         ({"VECTORIST_VECTOR_BACKEND": "nope"}, (), "vector backend"),
         ({"VECTORIST_EMBEDDER": "nope"}, (), "embedder"),
+        ({"VECTORIST_ENRICHER": "bogus"}, (), "enricher"),
         ({"VECTORIST_VECTOR_BACKEND": "pgvector"}, (), "VECTORIST_DATABASE_URL"),
         ({}, ("VECTORIST_CACHE_PATH",), "cache_path"),
     ],
-    ids=["unknown-backend", "unknown-embedder", "pgvector-no-url", "missing-cache-path"],
+    ids=["unknown-backend", "unknown-embedder", "unknown-enricher", "pgvector-no-url", "missing-cache-path"],
 )
 def test_startup_fails_loudly(tmp_path, overrides, removed, setting):
     env = _env(tmp_path, **overrides)

@@ -1,6 +1,6 @@
 # Testing
 
-`uv run pytest` is the default suite. It uses SQLite and the fake embedder, and it needs no Docker, Postgres, or model download. Heavier checks sit behind pytest markers and `make` targets. A tier whose prerequisite is missing skips with a reason instead of failing, except the embedder tier, which the default run leaves out.
+`uv run pytest` is the default suite. It uses SQLite and the fake embedder, and it needs no Docker, Postgres, or model download. Heavier checks sit behind pytest markers and `make` targets. A tier whose prerequisite is missing skips with a reason instead of failing, except the embedder and enricher tiers, which the default run leaves out.
 
 ## Tiers
 
@@ -11,6 +11,7 @@
 | Live server | `live` | `make test-live` | nothing for SQLite | uvicorn and the CLI as real subprocesses over a socket |
 | Real embedder | `embedder` | `make test-embedder` | Network on first run | Retrieval ranking with FastEmbed |
 | Crawl | `crawl` | `make test-crawl` | Chromium | The crawler against a local HTTP server |
+| Real enricher | `enricher` | `make test-enricher` | `ocr` extra, and `claude` extra plus `ANTHROPIC_API_KEY` | OCR and Claude describing a generated image |
 
 ## Backend parity
 
@@ -22,13 +23,19 @@
 
 `tests/integration/live.py` starts `python -m uvicorn vectorist.api.app:create_app --factory` on a free loopback port and polls `/v1/health` until it answers. If the process exits or does not become ready within 30 seconds, the error includes the server's stderr. Teardown sends SIGTERM and kills the process after 10 seconds.
 
-The tests cover ingest and search over a real socket, `vectorist.cli sync` run as a subprocess, the `vectorist-cli` console script, and restarts on the same data. After a restart, search still works, identical content is `skipped`, and an edit is `indexed`. Four startup failures are checked as real processes: an unknown vector backend, an unknown embedder, pgvector with no database URL, and a missing `VECTORIST_CACHE_PATH`. Each must exit non-zero within 15 seconds and name the setting on stderr. These tests match the current error wording, so a reworded error needs a matching test change.
+The tests cover ingest and search over a real socket, `vectorist.cli sync` run as a subprocess, the `vectorist-cli` console script, and restarts on the same data. After a restart, search still works, identical content is `skipped`, and an edit is `indexed`. Five startup failures are checked as real processes: an unknown vector backend, an unknown embedder, a `VECTORIST_ENRICHER` value that is not recognized, pgvector with no database URL, and a missing `VECTORIST_CACHE_PATH`. Each must exit non-zero within 15 seconds and name the setting on stderr. These tests match the current error wording, so a reworded error needs a matching test change.
 
 ## Real embedder
 
 `tests/integration/test_retrieval_quality.py` ingests four documents with the `fastembed` embedder and checks that each query ranks the expected document first. It compares rank order only, never scores, so a model change does not break it. The default run leaves this tier out, so `make test-embedder` clears that filter.
 
 The model is `BAAI/bge-small-en-v1.5`. FastEmbed caches it under `$TMPDIR/fastembed_cache`, and the OS can clear that directory, which triggers a new download.
+
+## Real enricher
+
+`tests/integration/test_enricher_providers.py` draws a PNG with text and checks that the OCR provider and the Claude provider each return non-empty text for it. A test skips with a reason when its extra or `ANTHROPIC_API_KEY` is missing. The Claude test calls the paid API. The default run leaves this tier out, so `make test-enricher` clears that filter.
+
+The default tier covers the rest of enrichment with the fake provider: the filter rules, the worker, the upload route and its status codes, a restart that finishes pending jobs, shared images, and edits that keep image text. The live tier has one test where `vectorist-cli sync` uploads images over a socket to a server started with `VECTORIST_ENRICHER=fake`. The crawl tier checks that a crawl uploads content images and not small ones.
 
 ## Crawl
 

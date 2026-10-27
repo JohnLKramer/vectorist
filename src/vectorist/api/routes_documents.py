@@ -51,9 +51,6 @@ async def get_document(document_id: str, request: Request) -> DocumentResponse:
 
 @router.delete("/v1/documents/{document_id}", status_code=204)
 async def delete_document(document_id: str, request: Request) -> Response:
-    document = await request.app.state.cache.get_document(document_id)
-    if document is None:
+    if not await request.app.state.ingest.delete_document(document_id):
         raise HTTPException(status_code=404, detail="document not found")
-    await request.app.state.store.delete_chunks_by_document_id(document_id)
-    await request.app.state.cache.delete_document(document_id)
     return Response(status_code=204)

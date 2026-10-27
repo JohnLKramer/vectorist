@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from vectorist.cli.assets import load_remote_asset, upload_assets
 from vectorist.cli.client import ServerClient
 from vectorist.cli.config import CrawlConfig
 from vectorist.cli.crawl.crawl import crawl
@@ -85,6 +86,17 @@ def run_crawl(
                     summary.unchanged += 1
                 else:
                     summary.ingested += 1
+                refs = item.get("pending_assets") or []
+                if refs and status in ("indexed", "skipped"):
+                    page_url = item["source_uri"]
+                    upload_assets(
+                        client,
+                        item["document_id"],
+                        page_url,
+                        refs,
+                        lambda ref, page_url=page_url: load_remote_asset(fetch, page_url, ref),
+                        summary,
+                    )
 
     if config.prune:
         keep = {page.final_url for page in result.pages}
